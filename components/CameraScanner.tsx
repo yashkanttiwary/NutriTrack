@@ -1,8 +1,7 @@
-
 import React, { useRef, useEffect, useState } from 'react';
 import { nutritionCalculator } from '../services/NutritionCalculator';
 import { MealItem } from '../types';
-import { parseAIJson, createGenAIClient } from '../services/aiHelper';
+import { parseAIJson, analyzeImageWithRetry, resizeImage } from '../services/aiHelper';
 
 interface CameraScannerProps {
   onClose: () => void;
@@ -73,33 +72,24 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
     setTimeout(() => setShutterFlash(false), 150);
 
     try {
-      const ai = createGenAIClient(apiKey);
       const video = videoRef.current;
       const canvas = canvasRef.current;
       
-      // OPTIMIZATION: Aggressive resizing for speed and payload safety
-      // 768px is sufficient for food recognition and keeps payload tiny (~150KB)
-      const MAX_SIZE = 768; 
-      let w = video.videoWidth;
-      let h = video.videoHeight;
-      
-      if (w > MAX_SIZE || h > MAX_SIZE) {
-        const ratio = Math.min(MAX_SIZE / w, MAX_SIZE / h);
-        w *= ratio;
-        h *= ratio;
-      }
-
-      canvas.width = w;
-      canvas.height = h;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error("Canvas init failed");
 
-      ctx.drawImage(video, 0, 0, w, h);
+      ctx.drawImage(video, 0, 0);
       
-      // OPTIMIZATION: 60% Quality JPEG is much faster to upload/process
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      const base64Image = dataUrl.split(',')[1];
+      // Get raw high-res image
+      const rawDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      
+      // OPTIMIZATION: Use helper to resize safely (1280px @ 0.8)
+      // Preserves detail for AI while preventing 4MB payload failures
+      const optimizedDataUrl = await resizeImage(rawDataUrl);
+      const base64Image = optimizedDataUrl.split(',')[1];
 
       // Robust Prompt
       const prompt = `
@@ -123,22 +113,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         ]
       `;
 
-      // MODEL CHANGE: gemini-3-flash-preview
-      // Faster, handles images well, less rigid on "safety" for food items.
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-          {
-            parts: [
-              { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-              { text: prompt }
-            ]
-          }
-        ],
-        config: { responseMimeType: "application/json" }
-      });
-
-      const rawJson = parseAIJson<any[]>(response.text || "[]");
+      // Use Robust Wrapper (Backoff + Caching)
+      const jsonText = await analyzeImageWithRetry(apiKey, base64Image, prompt);
+      const rawJson = parseAIJson<any[]>(jsonText || "[]");
       const detectedItems: MealItem[] = [];
 
       for (const item of rawJson) {
@@ -204,6 +181,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       else if (eStr.includes("404")) msg = "AI Model unavailable.";
       else if (eStr.includes("503")) msg = "Server busy. Try again.";
       else if (eStr.includes("Safety")) msg = "Image blocked by safety filters.";
+      else if (eStr.includes("retries")) msg = "Connection unstable. Try again.";
       
       setError(msg);
     } finally {

@@ -7,16 +7,18 @@ class NutritionDatabase extends Dexie {
   dailyLogs!: Table<DailyLog>;
   userProfile!: Table<UserProfile>;
   chatMessages!: Table<ChatMessage>;
+  apiCache!: Table<{ hash: string; response: string; timestamp: number }>;
 
   constructor() {
     super('NutriTrackDB');
     
     // Define schema
-    (this as any).version(4).stores({
+    (this as any).version(5).stores({
       meals: 'id, timestamp, mealType', 
       dailyLogs: 'date',
       userProfile: 'id',
-      chatMessages: '++id, timestamp' 
+      chatMessages: '++id, timestamp',
+      apiCache: 'hash, timestamp' // New table for API idempotency
     });
   }
 }

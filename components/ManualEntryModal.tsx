@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FoodItem, MealItem } from '../types';
 import { nutritionCalculator } from '../services/NutritionCalculator';
-import { createGenAIClient, parseAIJson } from '../services/aiHelper';
+import { parseAIJson, analyzeImageWithRetry, resizeImage } from '../services/aiHelper';
 import { Icons } from './Icons';
 
 interface ManualEntryModalProps {
@@ -68,60 +68,17 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
     }
   };
 
-  const resizeImage = (dataUrl: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const MAX_DIMENSION = 768;
-          let width = img.width;
-          let height = img.height;
-          
-          if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-            const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
-            width *= ratio;
-            height *= ratio;
-          }
-          
-          canvas.width = width;
-          canvas.height = height;
-          
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-              ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL('image/jpeg', 0.6));
-          } else {
-              resolve(dataUrl); 
-          }
-        } catch (e) {
-          console.error("Image resizing failed:", e);
-          resolve(dataUrl);
-        }
-      };
-      img.onerror = () => resolve(dataUrl);
-      img.src = dataUrl;
-    });
-  };
-
   const analyzeWithAI = async () => {
     if ((!query && !selectedImage) || isAnalyzing) return;
 
     setIsAnalyzing(true);
     try {
-      const ai = createGenAIClient(apiKey);
-      
-      const parts: any[] = [];
+      let imageBase64 = "";
+
       if (selectedImage) {
-        const resizedImage = await resizeImage(selectedImage);
-        const data = resizedImage.split(',')[1];
-        
-        parts.push({
-          inlineData: {
-            mimeType: 'image/jpeg', 
-            data: data
-          }
-        });
+        // High-Fidelity Resize
+        const resizedDataUrl = await resizeImage(selectedImage);
+        imageBase64 = resizedDataUrl.split(',')[1];
       }
       
       const promptText = `
@@ -138,15 +95,10 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
         fiber (number),
         micros (array of strings).
       `;
-      parts.push({ text: promptText });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [{ parts }],
-        config: { responseMimeType: "application/json" }
-      });
-
-      const rawJson = parseAIJson<any[]>(response.text || "[]");
+      // Use Robust Wrapper
+      const jsonText = await analyzeImageWithRetry(apiKey, imageBase64, promptText);
+      const rawJson = parseAIJson<any[]>(jsonText || "[]");
       
       const items: MealItem[] = rawJson.map((item: any) => ({
         id: Math.random().toString(36).substr(2, 9),
