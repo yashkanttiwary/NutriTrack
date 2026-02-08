@@ -1,6 +1,8 @@
+
 import React, { useState } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { UserProfile, Gender, ActivityLevel, Goal, DietaryPreference, NutritionTargets } from '../types';
+import { parseAIJson } from '../services/aiHelper';
 
 interface OnboardingProps {
   onComplete: (profile: Omit<UserProfile, 'id'>) => void;
@@ -121,7 +123,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         config: { responseMimeType: "application/json" }
       });
 
-      const result = JSON.parse(response.text || "{}");
+      // Fixed: Use parseAIJson utility for robust parsing
+      const result = parseAIJson<any>(response.text || "{}");
       
       // Basic validation
       if (result.calories && result.protein) {

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { getTodayLog, updateDailyTargets, saveMeal, getUserProfile, saveUserProfile } from './services/db';
 import { APP_CONFIG } from './constants';
@@ -8,6 +9,7 @@ import { Onboarding } from './components/Onboarding';
 import { AIGuidance } from './components/AIGuidance';
 import { nutritionCalculator } from './services/NutritionCalculator';
 import { GoogleGenAI } from "@google/genai";
+import { parseAIJson } from './services/aiHelper';
 
 // --- Premium Icons (Custom SVGs) ---
 const Icons = {
@@ -110,7 +112,9 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
         config: { responseMimeType: "application/json" }
       });
 
-      const rawJson = JSON.parse(response.text || "[]");
+      // Fix: Use parseAIJson to handle markdown and errors robustly
+      const rawJson = parseAIJson<any[]>(response.text || "[]");
+      
       const items: MealItem[] = rawJson.map((item: any) => ({
         id: Math.random().toString(36).substr(2, 9),
         foodId: 'ai_' + Math.random().toString(36).substr(2, 5),
@@ -711,6 +715,14 @@ const App: React.FC = () => {
     else if (hour >= 11 && hour < 16) mealType = 'Lunch';
     else if (hour >= 16 && hour < 22) mealType = 'Dinner';
 
+    // Collect all micros for the daily aggregation (HIGH-002 FIX)
+    const mealMicros: string[] = [];
+    detectedItems.forEach(item => {
+      if (item.nutrients.micros) {
+        mealMicros.push(...item.nutrients.micros);
+      }
+    });
+
     const meal: Meal = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date(),
@@ -722,10 +734,14 @@ const App: React.FC = () => {
         fat: acc.fat + item.nutrients.fat,
         fiber: acc.fiber + item.nutrients.fiber,
         sourceDatabase: "IFCT",
-        micros: [] // Aggregate logic would go here, simplified for now
-      }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sourceDatabase: "IFCT" as any }),
+        micros: [] // We aggregate aggregation in db.ts updateDailyLog, but good to have here too for meal object validity
+      }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sourceDatabase: "IFCT" as any, micros: [] }),
       mealType: mealType
     };
+    
+    // Explicitly set the collected micros on the meal total for the DB to pick up
+    // Note: The reducer above initializes to empty, so we override it here with all unique micros from the items
+    meal.totalNutrients.micros = Array.from(new Set(mealMicros));
 
     await saveMeal(meal);
     setDetectedItems(null);

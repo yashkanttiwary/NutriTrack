@@ -1,7 +1,9 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { nutritionCalculator } from '../services/NutritionCalculator';
 import { MealItem } from '../types';
+import { parseAIJson } from '../services/aiHelper';
 
 interface CameraScannerProps {
   onClose: () => void;
@@ -83,7 +85,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         config: { responseMimeType: "application/json" }
       });
 
-      const rawJson = JSON.parse(response.text || "[]");
+      // Fixed: Use parseAIJson utility for robust parsing
+      const rawJson = parseAIJson<any[]>(response.text || "[]");
       const detectedItems: MealItem[] = [];
 
       for (const item of rawJson) {

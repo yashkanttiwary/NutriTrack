@@ -12,10 +12,7 @@ class NutritionDatabase extends Dexie {
     super('NutriTrackDB');
     
     // Define schema
-    // Version 4: Bumped to ensure chatMessages table is created if it failed in v3
-    // We define previous versions to allow upgrade path if needed, but for this fix,
-    // defining the latest state as a new version is sufficient to trigger schema update.
-    this.version(4).stores({
+    (this as any).version(4).stores({
       meals: 'id, timestamp, mealType', 
       dailyLogs: 'date',
       userProfile: 'id',
@@ -26,6 +23,15 @@ class NutritionDatabase extends Dexie {
 
 // Create a single instance of the database
 export const db = new NutritionDatabase();
+
+// --- Date Helper (HIGH-001 Fix) ---
+// Generates YYYY-MM-DD based on LOCAL time, not UTC
+function getLocalDayKey(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 // --- User Profile Helpers ---
 
@@ -58,7 +64,7 @@ export async function getChatHistory(): Promise<ChatMessage[]> {
 // Helper to save a meal with transaction support for atomicity
 export async function saveMeal(meal: Meal) {
   // Use the transaction method from the Dexie instance
-  return await db.transaction('rw', [db.meals, db.dailyLogs], async () => {
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     await db.meals.add(meal);
     await updateDailyLog(meal.timestamp);
   });
@@ -67,7 +73,7 @@ export async function saveMeal(meal: Meal) {
 // Helper to delete a meal and update the daily log
 export async function deleteMeal(id: string) {
   // Use the transaction method from the Dexie instance
-  return await db.transaction('rw', [db.meals, db.dailyLogs], async () => {
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     const meal = await db.meals.get(id);
     if (!meal) return;
     
@@ -78,7 +84,7 @@ export async function deleteMeal(id: string) {
 
 // Fetch today's log or return a default empty structure
 export async function getTodayLog(): Promise<DailyLog> {
-  const dateStr = new Date().toISOString().split('T')[0];
+  const dateStr = getLocalDayKey(); // Fixed: Use local date
   const log = await db.dailyLogs.get(dateStr);
   
   if (log) return log;
@@ -106,10 +112,10 @@ export async function getTodayLog(): Promise<DailyLog> {
 
 // Update targets for specific date
 export async function updateDailyTargets(targets: DailyLog['targets']) {
-  const dateStr = new Date().toISOString().split('T')[0];
+  const dateStr = getLocalDayKey(); // Fixed: Use local date
   
   // Use the transaction method from the Dexie instance
-  await db.transaction('rw', [db.dailyLogs], async () => {
+  await (db as any).transaction('rw', [db.dailyLogs], async () => {
     const log = await db.dailyLogs.get(dateStr);
     if (log) {
       await db.dailyLogs.update(dateStr, { targets });
@@ -127,12 +133,14 @@ export async function updateDailyTargets(targets: DailyLog['targets']) {
 
 // Re-calculates daily log from scratch to prevent rounding drift
 async function updateDailyLog(date: Date) {
-  const dateStr = date.toISOString().split('T')[0];
+  const dateStr = getLocalDayKey(date); // Fixed: Use local date of the meal
   
   // Find all meals for this day
-  const dayStart = new Date(dateStr);
+  // Construct local start/end times carefully
+  const dayStart = new Date(date);
   dayStart.setHours(0,0,0,0);
-  const dayEnd = new Date(dateStr);
+  
+  const dayEnd = new Date(date);
   dayEnd.setHours(23,59,59,999);
   
   const meals = await db.meals
@@ -183,11 +191,16 @@ function createZeroNutrients(): Nutrients {
     carbs: 0,
     fat: 0,
     fiber: 0,
-    sourceDatabase: "Custom"
+    sourceDatabase: "Custom",
+    micros: []
   };
 }
 
 function sumNutrients(a: Nutrients, b: Nutrients): Nutrients {
+  // Aggregate micros: combine arrays and deduplicate simple strings
+  const combinedMicros = [...(a.micros || []), ...(b.micros || [])];
+  const uniqueMicros = Array.from(new Set(combinedMicros));
+
   return {
     calories: Math.round(a.calories + b.calories),
     // Fix floating point precision issues (e.g. 0.1 + 0.2 = 0.300000004)
@@ -195,6 +208,7 @@ function sumNutrients(a: Nutrients, b: Nutrients): Nutrients {
     carbs: parseFloat((a.carbs + b.carbs).toFixed(1)),
     fat: parseFloat((a.fat + b.fat).toFixed(1)),
     fiber: parseFloat((a.fiber + b.fiber).toFixed(1)),
-    sourceDatabase: a.sourceDatabase
+    sourceDatabase: a.sourceDatabase,
+    micros: uniqueMicros
   };
 }
