@@ -64,7 +64,8 @@ export async function getChatHistory(): Promise<ChatMessage[]> {
 // Helper to save a meal with transaction support for atomicity
 export async function saveMeal(meal: Meal) {
   // Use the transaction method from the Dexie instance
-  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
+  // CRITICAL FIX: Include db.userProfile because updateDailyLog calls getUserProfile()
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs, db.userProfile], async () => {
     await db.meals.add(meal);
     await updateDailyLog(meal.timestamp);
   });
@@ -73,7 +74,8 @@ export async function saveMeal(meal: Meal) {
 // Helper to delete a meal and update the daily log
 export async function deleteMeal(id: string) {
   // Use the transaction method from the Dexie instance
-  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
+  // CRITICAL FIX: Include db.userProfile because updateDailyLog calls getUserProfile()
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs, db.userProfile], async () => {
     const meal = await db.meals.get(id);
     if (!meal) return;
     
