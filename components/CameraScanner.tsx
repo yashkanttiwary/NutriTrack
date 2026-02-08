@@ -1,9 +1,8 @@
 
 import React, { useRef, useEffect, useState } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { nutritionCalculator } from '../services/NutritionCalculator';
 import { MealItem } from '../types';
-import { parseAIJson } from '../services/aiHelper';
+import { parseAIJson, createGenAIClient } from '../services/aiHelper';
 
 interface CameraScannerProps {
   onClose: () => void;
@@ -60,18 +59,21 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
     setError(null);
 
     try {
+      // 1. Validate Client First
+      const ai = createGenAIClient(apiKey);
+
+      // 2. Capture Image
       const video = videoRef.current;
       const canvas = canvasRef.current;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+      if (!ctx) throw new Error("Could not initialize canvas");
 
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
-      // UPDATED: Using gemini-3-pro-preview for better reasoning capabilities
-      const ai = new GoogleGenAI({ apiKey });
+      // 3. AI Request
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: [
@@ -85,7 +87,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         config: { responseMimeType: "application/json" }
       });
 
-      // Fixed: Use parseAIJson utility for robust parsing
+      // 4. Parse Response
       const rawJson = parseAIJson<any[]>(response.text || "[]");
       const detectedItems: MealItem[] = [];
 
@@ -94,7 +96,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         const matches = nutritionCalculator.searchFoods(item.name);
         
         // Validation: Ensure grams is a valid number by stripping non-numeric chars
-        // This fixes the "150gg" and "NaN" issue
         const gramsStr = String(item.grams);
         let grams = parseFloat(gramsStr.replace(/[^0-9.]/g, ''));
         
@@ -128,9 +129,15 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         stopCamera(); // Stop camera immediately on success
         onResult(detectedItems);
       }
-    } catch (err) {
-      console.error(err);
-      setError("AI Analysis failed. Please check your API key.");
+    } catch (err: any) {
+      console.error("Scanning Error:", err);
+      if (err.message.includes("API Key")) {
+        setError(err.message);
+      } else if (err.toString().includes("403")) {
+        setError("API Key rejected. Please check your key in Profile.");
+      } else {
+        setError("Analysis failed. Please try again.");
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -171,9 +178,15 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
             </div>
           </div>
           {error && (
-            <div className="absolute bottom-10 left-0 right-0 px-8 text-center">
-              <div className="bg-red-500/90 backdrop-blur-md text-white px-4 py-3 rounded-2xl text-sm font-medium animate-bounce shadow-xl">
-                {error}
+            <div className="absolute bottom-10 left-0 right-0 px-8 text-center z-50">
+              <div className="bg-red-500/90 backdrop-blur-md text-white px-6 py-4 rounded-2xl text-sm font-medium animate-bounce shadow-xl border border-red-400">
+                <p className="mb-2">{error}</p>
+                <button 
+                  onClick={onClose} 
+                  className="bg-white text-red-600 px-4 py-1 rounded-lg text-xs font-bold uppercase"
+                >
+                  Close & Check Settings
+                </button>
               </div>
             </div>
           )}

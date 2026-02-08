@@ -8,8 +8,7 @@ import { CameraScanner } from './components/CameraScanner';
 import { Onboarding } from './components/Onboarding';
 import { AIGuidance } from './components/AIGuidance';
 import { nutritionCalculator } from './services/NutritionCalculator';
-import { GoogleGenAI } from "@google/genai";
-import { parseAIJson } from './services/aiHelper';
+import { createGenAIClient, parseAIJson } from './services/aiHelper';
 
 // --- Premium Icons (Custom SVGs) ---
 const Icons = {
@@ -116,17 +115,11 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
 
   const analyzeWithAI = async () => {
     if ((!query && !selectedImage) || isAnalyzing) return;
-    
-    // API Key Validation
-    const cleanKey = apiKey ? apiKey.trim() : "";
-    if (!cleanKey) {
-      alert("API Key is invalid or missing. Please check your Profile.");
-      return;
-    }
 
     setIsAnalyzing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: cleanKey });
+      // 1. Create and Validate Client
+      const ai = createGenAIClient(apiKey);
       
       const parts: any[] = [];
       if (selectedImage) {
@@ -196,7 +189,9 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
       console.error("AI Error:", error);
       const msg = error.message || String(error);
       
-      if (msg.includes("API_KEY") || msg.includes("403")) {
+      if (msg.includes("API Key")) {
+         alert("Authentication failed: " + msg);
+      } else if (msg.includes("403")) {
          alert("Authentication failed. Please check your Gemini API Key in Profile.");
       } else if (msg.includes("413") || msg.includes("payload")) {
          alert("Image is too large. The system attempted to resize it but it's still too big. Try a smaller image.");
@@ -675,10 +670,28 @@ const HistoryView = ({ log }: { log: DailyLog }) => (
   </div>
 );
 
-const ProfileView = ({ profile }: { profile: UserProfile }) => (
+const ProfileView = ({ profile, onUpdateProfile }: { profile: UserProfile, onUpdateProfile: (p: UserProfile) => void }) => {
+  const [isEditingKey, setIsEditingKey] = useState(false);
+  const [newKey, setNewKey] = useState('');
+  
+  const handleDisconnect = () => {
+    if (window.confirm("Disconnecting will disable AI features. Continue?")) {
+      onUpdateProfile({ ...profile, apiKey: '' });
+    }
+  };
+
+  const handleSaveKey = () => {
+    if (!newKey.trim()) return;
+    onUpdateProfile({ ...profile, apiKey: newKey.trim() });
+    setIsEditingKey(false);
+    setNewKey('');
+  };
+
+  return (
     <div className="animate-in fade-in duration-500 space-y-4 sm:space-y-6 pb-24 md:pb-0">
         <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight px-1">Profile</h2>
         
+        {/* Profile Header */}
         <div className="bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-50 shadow-sm flex items-center gap-4 sm:gap-6">
             <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-100 rounded-full flex items-center justify-center text-2xl sm:text-3xl font-bold text-gray-400">
                 {profile.name.charAt(0)}
@@ -686,6 +699,68 @@ const ProfileView = ({ profile }: { profile: UserProfile }) => (
             <div>
                 <h3 className="text-lg sm:text-xl font-bold text-gray-900">{profile.name}</h3>
                 <p className="text-gray-500 text-xs sm:text-sm">Goal: {profile.goal}</p>
+            </div>
+        </div>
+
+        {/* API Key Management Section */}
+        <div className="bg-white p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-gray-50 shadow-sm">
+            <h3 className="font-bold text-gray-800 mb-4 text-sm sm:text-base flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+              AI Settings
+            </h3>
+            
+            <div className="bg-gray-50 rounded-2xl p-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Gemini API Key</span>
+                <span className={`text-[10px] font-bold px-2 py-1 rounded-lg ${profile.apiKey ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {profile.apiKey ? 'CONNECTED' : 'DISCONNECTED'}
+                </span>
+              </div>
+              
+              {profile.apiKey && !isEditingKey ? (
+                <div className="flex gap-3 mt-3">
+                   <div className="flex-1 p-3 bg-white rounded-xl border border-gray-200 text-gray-400 font-mono text-sm flex items-center">
+                     •••• •••• •••• {profile.apiKey.slice(-4)}
+                   </div>
+                   <button 
+                     onClick={handleDisconnect}
+                     className="px-4 py-2 bg-white border border-red-100 text-red-500 font-bold rounded-xl text-xs sm:text-sm hover:bg-red-50 transition-colors"
+                   >
+                     Disconnect
+                   </button>
+                </div>
+              ) : (
+                <div className="flex gap-2 mt-3">
+                   <input 
+                     type="text" 
+                     value={newKey}
+                     onChange={e => setNewKey(e.target.value)}
+                     placeholder="Paste new API Key here..."
+                     className="flex-1 p-3 bg-white rounded-xl border border-gray-200 text-sm focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                   />
+                   <button 
+                     onClick={handleSaveKey}
+                     className="px-4 py-2 bg-primary text-white font-bold rounded-xl text-xs sm:text-sm shadow-lg shadow-green-100 active:scale-95 transition-all"
+                   >
+                     Connect
+                   </button>
+                </div>
+              )}
+
+               {profile.apiKey && !isEditingKey && (
+                 <button 
+                   onClick={() => setIsEditingKey(true)}
+                   className="text-xs text-gray-400 underline mt-3 hover:text-primary transition-colors ml-1"
+                 >
+                   Change Key
+                 </button>
+               )}
+               
+               {!profile.apiKey && (
+                 <p className="text-[10px] text-gray-400 mt-3 ml-1">
+                    Get a key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-primary hover:underline">Google AI Studio</a>.
+                 </p>
+               )}
             </div>
         </div>
 
@@ -734,7 +809,8 @@ const ProfileView = ({ profile }: { profile: UserProfile }) => (
             </div>
         )}
     </div>
-);
+  );
+};
 
 
 // --- Main App ---
@@ -786,6 +862,12 @@ const App: React.FC = () => {
     // 2. Update Daily Log (Immediate reflection)
     await updateDailyTargets(newTargets);
     setLog({ ...log, targets: newTargets });
+  };
+  
+  const handleUpdateProfile = async (updatedProfile: UserProfile) => {
+    const { id, ...profileData } = updatedProfile;
+    await saveUserProfile(profileData);
+    setUserProfile(updatedProfile);
   };
 
   const handleScanResult = (items: MealItem[]) => {
@@ -931,7 +1013,7 @@ const App: React.FC = () => {
                   />
                )}
                {currentView === 'history' && <HistoryView log={log} />}
-               {currentView === 'profile' && <ProfileView profile={userProfile} />}
+               {currentView === 'profile' && <ProfileView profile={userProfile} onUpdateProfile={handleUpdateProfile} />}
             </main>
 
             {/* Floating Navigation Bar */}

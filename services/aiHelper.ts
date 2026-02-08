@@ -1,4 +1,25 @@
 
+import { GoogleGenAI } from "@google/genai";
+
+/**
+ * Creates a validated GoogleGenAI client instance.
+ * Throws descriptive errors if the API key is missing or invalid.
+ */
+export const createGenAIClient = (apiKey: string): GoogleGenAI => {
+  const cleanKey = apiKey ? apiKey.trim() : "";
+  
+  if (!cleanKey) {
+    throw new Error("API Key is missing. Please configure it in your Profile settings.");
+  }
+  
+  // Basic format check (optional, but helpful for immediate feedback)
+  if (cleanKey.length < 10) {
+    throw new Error("API Key appears to be invalid. Please check your Profile settings.");
+  }
+
+  return new GoogleGenAI({ apiKey: cleanKey });
+};
+
 /**
  * Utility to clean and parse JSON responses from AI models.
  * Models often wrap JSON in Markdown code blocks (```json ... ```), 

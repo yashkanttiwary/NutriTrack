@@ -1,7 +1,8 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { UserProfile, DailyLog, ChatMessage } from '../types';
 import { getChatHistory, saveChatMessage } from '../services/db';
+import { createGenAIClient } from '../services/aiHelper';
 
 interface AIGuidanceProps {
   apiKey: string;
@@ -58,7 +59,8 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
     try {
       await saveChatMessage('user', userMsgText);
 
-      const ai = new GoogleGenAI({ apiKey });
+      // 1. Create and Validate Client
+      const ai = createGenAIClient(apiKey);
       
       // Construct context with Plan Explanation and History
       const historyContext = messages.slice(-5).map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${m.text}`).join('\n');
@@ -104,9 +106,16 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
       await saveChatMessage('model', replyText);
       setMessages(prev => [...prev, { role: 'model', text: replyText, timestamp: Date.now() }]);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      const errorMsg = "Connection error. Please check your API key or internet.";
+      let errorMsg = "Connection error. Please check your internet.";
+      
+      if (error.message.includes("API Key")) {
+         errorMsg = "Please configure your API Key in settings.";
+      } else if (error.toString().includes("403")) {
+         errorMsg = "API Key authentication failed.";
+      }
+      
       setMessages(prev => [...prev, { role: 'model', text: errorMsg, timestamp: Date.now() }]);
     } finally {
       setLoading(false);
