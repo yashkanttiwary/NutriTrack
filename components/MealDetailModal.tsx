@@ -36,7 +36,7 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({ meal, onClose,
         <div className="bg-green-50 rounded-[1.5rem] p-6 mb-6 border border-green-100">
            <div className="flex justify-between items-end mb-4">
               <span className="text-xs font-bold text-green-600 uppercase tracking-widest">Total Energy</span>
-              <span className="text-3xl font-black text-primary">{meal.totalNutrients.calories} <span className="text-lg text-green-600/60">kcal</span></span>
+              <span className="text-3xl font-black text-primary">{Math.round(meal.totalNutrients.calories)} <span className="text-lg text-green-600/60">kcal</span></span>
            </div>
            <div className="grid grid-cols-3 gap-3">
               <MacroBox label="Protein" val={meal.totalNutrients.protein} color="blue" />
@@ -52,13 +52,13 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({ meal, onClose,
             <div key={idx} className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
                <div className="flex justify-between items-start mb-2">
                   <span className="font-bold text-gray-900 text-sm sm:text-base">{item.portionLabel}</span>
-                  <span className="font-black text-gray-700 text-sm">{item.nutrients.calories} kcal</span>
+                  <span className="font-black text-gray-700 text-sm">{Math.round(item.nutrients.calories)} kcal</span>
                </div>
                <div className="flex gap-3 text-xs text-gray-500">
-                  <span><span className="font-bold text-blue-500">P</span> {item.nutrients.protein}g</span>
-                  <span><span className="font-bold text-yellow-500">C</span> {item.nutrients.carbs}g</span>
-                  <span><span className="font-bold text-purple-500">F</span> {item.nutrients.fat}g</span>
-                  {item.nutrients.fiber > 0 && <span><span className="font-bold text-green-500">Fib</span> {item.nutrients.fiber}g</span>}
+                  <span><span className="font-bold text-blue-500">P</span> {item.nutrients.protein.toFixed(1)}g</span>
+                  <span><span className="font-bold text-yellow-500">C</span> {item.nutrients.carbs.toFixed(1)}g</span>
+                  <span><span className="font-bold text-purple-500">F</span> {item.nutrients.fat.toFixed(1)}g</span>
+                  {item.nutrients.fiber > 0 && <span><span className="font-bold text-green-500">Fib</span> {item.nutrients.fiber.toFixed(1)}g</span>}
                </div>
             </div>
           ))}
@@ -100,7 +100,7 @@ const MacroBox = ({ label, val, color }: { label: string, val: number, color: st
     return (
         <div className={`p-3 rounded-xl text-center ${colorClasses[color]}`}>
             <div className="text-[9px] font-bold uppercase opacity-70 mb-1">{label}</div>
-            <div className="text-lg font-black">{val}g</div>
+            <div className="text-lg font-black">{Number(val).toFixed(1)}g</div>
         </div>
     );
 };

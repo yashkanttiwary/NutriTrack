@@ -75,7 +75,7 @@ export const ResultSummary: React.FC<ResultSummaryProps> = ({ items, onUpdate, o
               <div>
                 <div className="font-bold text-gray-800">{item.portionLabel}</div>
                 <div className="text-xs text-gray-500 mt-1">
-                  {item.nutrients.protein}p • {item.nutrients.carbs}c • {item.nutrients.fat}f
+                  {item.nutrients.protein.toFixed(1)}p • {item.nutrients.carbs.toFixed(1)}c • {item.nutrients.fat.toFixed(1)}f
                   {item.nutrients.sourceDatabase === 'AI' && <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded text-[9px] font-bold uppercase">AI Est.</span>}
                 </div>
                 {item.nutrients.micros && item.nutrients.micros.length > 0 && (
@@ -87,7 +87,7 @@ export const ResultSummary: React.FC<ResultSummaryProps> = ({ items, onUpdate, o
                 )}
               </div>
               <div className="flex items-center gap-3">
-                 <div className="font-black text-gray-900">{item.nutrients.calories}</div>
+                 <div className="font-black text-gray-900">{Math.round(item.nutrients.calories)}</div>
                  <button onClick={() => handleRemove(idx)} className="p-2 text-gray-400 hover:text-red-500 bg-white rounded-xl shadow-sm">
                     <Icons.Trash />
                  </button>
