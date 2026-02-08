@@ -1,5 +1,4 @@
 import { NutritionCalculator } from './NutritionCalculator';
-import { nutritionDb } from '../data/nutrition-db';
 
 // Declare test globals to fix compilation errors
 declare const describe: any;

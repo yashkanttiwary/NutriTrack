@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { nutritionCalculator } from '../services/NutritionCalculator';
-import { MealItem, Nutrients } from '../types';
+import { MealItem } from '../types';
 
 interface CameraScannerProps {
   onClose: () => void;
@@ -14,6 +14,18 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => {
+        track.stop();
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
+      });
+      setStream(null);
+    }
+  };
 
   useEffect(() => {
     async function startCamera() {
@@ -31,8 +43,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
       }
     }
     startCamera();
+    
+    // Cleanup on unmount
     return () => {
-      stream?.getTracks().forEach(track => track.stop());
+      stopCamera();
     };
   }, []);
 
@@ -53,14 +67,15 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
+      // UPDATED: Using gemini-3-pro-preview for better reasoning capabilities
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3-pro-preview',
         contents: [
           {
             parts: [
               { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-              { text: "Identify the Indian food items on this plate. For each item, estimate the portion size in grams or pieces. Return a JSON array of objects with 'name' and 'grams' fields. Be concise and prioritize items common in the IFCT (Indian Food Composition Tables)." }
+              { text: "Identify the Indian food items on this plate. For each item, estimate the portion size in grams carefully. Return a JSON array of objects with keys: 'name' (string) and 'grams' (number). Example: [{'name': 'Paneer Butter Masala', 'grams': 200}]. Do not include units in the 'grams' field, just the number." }
             ]
           }
         ],
@@ -71,11 +86,21 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
       const detectedItems: MealItem[] = [];
 
       for (const item of rawJson) {
-        // Try to match with local DB using fuzzy search
+        // Match with local DB using fuzzy search
         const matches = nutritionCalculator.searchFoods(item.name);
+        
+        // Validation: Ensure grams is a valid number by stripping non-numeric chars
+        // This fixes the "150gg" and "NaN" issue
+        const gramsStr = String(item.grams);
+        let grams = parseFloat(gramsStr.replace(/[^0-9.]/g, ''));
+        
+        if (isNaN(grams) || grams <= 0) {
+           // Fallback to default if AI fails to give a valid number
+           grams = matches.length > 0 ? matches[0].defaultPortionGrams : 100;
+        }
+
         if (matches.length > 0) {
           const food = matches[0];
-          const grams = item.grams || food.defaultPortionGrams;
           const nutrients = nutritionCalculator.calculateNutrients(food.id, grams);
           
           detectedItems.push({
@@ -91,13 +116,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
       }
 
       if (detectedItems.length === 0) {
-        setError("Could not identify any food items. Try a different angle or better lighting.");
+        setError("Could not identify known Indian food items. Try a better angle.");
       } else {
+        stopCamera(); // Stop camera immediately on success
         onResult(detectedItems);
       }
     } catch (err) {
       console.error(err);
-      setError("AI Analysis failed. Check your internet connection.");
+      setError("AI Analysis failed. Please try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -123,7 +149,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
           <div className="px-4 py-2 bg-black/40 backdrop-blur-md rounded-2xl text-white text-xs font-bold uppercase tracking-widest border border-white/10">
-            {isProcessing ? "Analyzing Plate..." : "Ready to Scan"}
+            {isProcessing ? "Gemini Pro Analyzing..." : "Ready to Scan"}
           </div>
           <div className="w-10" /> {/* Spacer */}
         </div>
@@ -148,7 +174,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
 
         <div className="flex flex-col items-center gap-6">
           <p className="text-white/60 text-sm font-medium text-center max-w-[200px]">
-            Point your camera at the plate and tap the button
+            Point at food and tap to analyze
           </p>
           <button
             onClick={captureAndDetect}
