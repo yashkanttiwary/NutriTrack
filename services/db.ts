@@ -212,3 +212,44 @@ function sumNutrients(a: Nutrients, b: Nutrients): Nutrients {
     micros: uniqueMicros
   };
 }
+
+// --- Import/Export Helpers (HIGH-002) ---
+
+export async function exportUserData(): Promise<Blob> {
+  const profile = await db.userProfile.toArray();
+  const logs = await db.dailyLogs.toArray();
+  const meals = await db.meals.toArray();
+  const chat = await db.chatMessages.toArray();
+  
+  const data = JSON.stringify({
+    version: 1,
+    timestamp: Date.now(),
+    data: { profile, logs, meals, chat }
+  }, null, 2);
+  
+  return new Blob([data], { type: 'application/json' });
+}
+
+export async function importUserData(jsonString: string): Promise<boolean> {
+  try {
+    const backup = JSON.parse(jsonString);
+    if (!backup.data) throw new Error("Invalid backup format");
+    
+    // Clear existing data and import new data transactionally
+    await (db as any).transaction('rw', [db.userProfile, db.dailyLogs, db.meals, db.chatMessages], async () => {
+      await db.userProfile.clear();
+      await db.dailyLogs.clear();
+      await db.meals.clear();
+      await db.chatMessages.clear();
+      
+      if (backup.data.profile?.length) await db.userProfile.bulkAdd(backup.data.profile);
+      if (backup.data.logs?.length) await db.dailyLogs.bulkAdd(backup.data.logs);
+      if (backup.data.meals?.length) await db.meals.bulkAdd(backup.data.meals);
+      if (backup.data.chat?.length) await db.chatMessages.bulkAdd(backup.data.chat);
+    });
+    return true;
+  } catch (e) {
+    console.error("Import failed", e);
+    throw e;
+  }
+}

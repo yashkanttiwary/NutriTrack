@@ -1,507 +1,15 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { getTodayLog, updateDailyTargets, saveMeal, getUserProfile, saveUserProfile } from './services/db';
+import { getTodayLog, updateDailyTargets, saveMeal, getUserProfile, saveUserProfile, exportUserData, importUserData } from './services/db';
 import { APP_CONFIG } from './constants';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { DailyLog, MealItem, Meal, FoodItem, UserProfile, NutritionTargets } from './types';
+import { DailyLog, MealItem, Meal, UserProfile, NutritionTargets } from './types';
 import { CameraScanner } from './components/CameraScanner';
 import { Onboarding } from './components/Onboarding';
 import { AIGuidance } from './components/AIGuidance';
-import { nutritionCalculator } from './services/NutritionCalculator';
-import { createGenAIClient, parseAIJson } from './services/aiHelper';
-
-// --- Premium Icons (Custom SVGs) ---
-const Icons = {
-  Camera: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>,
-  Pencil: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>,
-  Home: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-  Book: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
-  User: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
-  Flame: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>,
-  Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>,
-  X: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
-  Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
-  Image: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
-  Send: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>,
-  Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>,
-  Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-};
-
-// --- Modals ---
-
-const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onAdd: (items: MealItem[]) => void, apiKey: string }) => {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<FoodItem[]>([]);
-  const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
-  const [quantity, setQuantity] = useState(100); // grams
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    // Only search local DB if it looks like a simple food name (no spaces or short)
-    if (query.trim().length > 1 && !selectedImage && !isAnalyzing) {
-      setResults(nutritionCalculator.searchFoods(query));
-    } else {
-      setResults([]);
-    }
-  }, [query, selectedImage, isAnalyzing]);
-
-  const handleLocalAdd = () => {
-    if (!selectedFood) return;
-    const nutrients = nutritionCalculator.calculateNutrients(selectedFood.id, quantity);
-    const item: MealItem = {
-      id: Math.random().toString(36).substr(2, 9),
-      foodId: selectedFood.id,
-      portionGrams: quantity,
-      portionLabel: `${quantity}g ${selectedFood.name}`,
-      nutrients: nutrients,
-      confidence: "high", // manual entry is accurate
-      manuallyAdded: true
-    };
-    onAdd([item]);
-  };
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // Improved Image Resizing: Faster, Smaller payload (768px, 60% quality)
-  const resizeImage = (dataUrl: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const MAX_DIMENSION = 768; // Optimized for Speed
-          let width = img.width;
-          let height = img.height;
-          
-          if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-            const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
-            width *= ratio;
-            height *= ratio;
-          }
-          
-          canvas.width = width;
-          canvas.height = height;
-          
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-              ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL('image/jpeg', 0.6)); // 60% Quality
-          } else {
-              resolve(dataUrl); 
-          }
-        } catch (e) {
-          console.error("Image resizing failed:", e);
-          resolve(dataUrl);
-        }
-      };
-      img.onerror = () => resolve(dataUrl);
-      img.src = dataUrl;
-    });
-  };
-
-  const analyzeWithAI = async () => {
-    if ((!query && !selectedImage) || isAnalyzing) return;
-
-    setIsAnalyzing(true);
-    try {
-      const ai = createGenAIClient(apiKey);
-      
-      const parts: any[] = [];
-      if (selectedImage) {
-        const resizedImage = await resizeImage(selectedImage);
-        const data = resizedImage.split(',')[1];
-        
-        parts.push({
-          inlineData: {
-            mimeType: 'image/jpeg', 
-            data: data
-          }
-        });
-      }
-      
-      const promptText = `
-        Analyze this meal. Text description: "${query}". 
-        Identify all food items. For each item, estimate the weight in grams and provide nutrition data.
-        
-        Return a JSON array with keys: 
-        name (string), 
-        grams (number), 
-        calories (number), 
-        protein (number), 
-        carbs (number), 
-        fat (number), 
-        fiber (number),
-        micros (array of strings).
-      `;
-      parts.push({ text: promptText });
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [{ parts }],
-        config: { responseMimeType: "application/json" }
-      });
-
-      const rawJson = parseAIJson<any[]>(response.text || "[]");
-      
-      const items: MealItem[] = rawJson.map((item: any) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        foodId: 'ai_' + Math.random().toString(36).substr(2, 5),
-        portionGrams: item.grams,
-        portionLabel: `${item.grams}g ${item.name}`,
-        nutrients: {
-          calories: item.calories,
-          protein: item.protein,
-          carbs: item.carbs,
-          fat: item.fat,
-          fiber: item.fiber,
-          micros: item.micros || [],
-          sourceDatabase: "AI"
-        },
-        confidence: "medium",
-        manuallyAdded: true
-      }));
-
-      if (items.length > 0) {
-        onAdd(items);
-      } else {
-        alert("AI could not identify any food. Please try again or add more description.");
-      }
-
-    } catch (error: any) {
-      console.error("AI Error:", error);
-      const msg = error.message || String(error);
-      
-      if (msg.includes("API Key")) {
-         alert("Authentication failed: " + msg);
-      } else if (msg.includes("403")) {
-         alert("Authentication failed. Please check your Gemini API Key in Profile.");
-      } else if (msg.includes("413") || msg.includes("payload")) {
-         alert("Image is too large. The system attempted to resize it but it's still too big. Try a smaller image.");
-      } else {
-         alert(`Failed to analyze meal. Error: ${msg}.`);
-      }
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-lg md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl h-[90vh] md:h-auto md:max-h-[85vh] flex flex-col relative overflow-hidden transition-all">
-        
-        {/* Loading Overlay */}
-        {isAnalyzing && (
-          <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in">
-             <div className="w-20 h-20 relative mb-6">
-                <div className="absolute inset-0 border-4 border-gray-100 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                <div className="absolute inset-4 bg-primary/10 rounded-full flex items-center justify-center animate-pulse">
-                   <Icons.Search />
-                </div>
-             </div>
-             <h3 className="text-xl font-bold text-gray-900 mb-2">Analyzing Meal...</h3>
-             <p className="text-gray-500 text-sm">Identifying foods & calculating nutrients</p>
-          </div>
-        )}
-
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Log Meal</h3>
-          <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
-        </div>
-
-        {!selectedFood ? (
-          <>
-            {/* Smart Input Section */}
-            <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100 mb-4 sm:mb-6 transition-all focus-within:border-primary/30 focus-within:ring-4 focus-within:ring-primary/5 shrink-0">
-              <textarea
-                placeholder="Describe your meal (e.g. '2 idli with sambar') or search database..."
-                className="w-full bg-transparent border-none focus:ring-0 text-gray-800 placeholder-gray-400 resize-none h-20 text-base sm:text-lg leading-relaxed"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                autoFocus
-              />
-              
-              {selectedImage && (
-                <div className="relative mt-2 mb-4 w-16 h-16 sm:w-20 sm:h-20">
-                  <img src={selectedImage} alt="Preview" className="w-full h-full object-cover rounded-xl border border-gray-200" />
-                  <button 
-                    onClick={() => setSelectedImage(null)}
-                    className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-red-500 scale-75 sm:scale-100"
-                  >
-                    <Icons.X />
-                  </button>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center mt-2">
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-primary bg-white rounded-xl shadow-sm border border-gray-100 hover:bg-green-50 transition-colors"
-                  >
-                    <Icons.Image />
-                  </button>
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    className="hidden" 
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                  />
-                </div>
-                
-                <button 
-                  onClick={analyzeWithAI}
-                  disabled={isAnalyzing || (!query && !selectedImage)}
-                  className={`flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 rounded-xl font-bold text-sm sm:text-base transition-all ${
-                    isAnalyzing || (!query && !selectedImage)
-                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-primary text-white shadow-lg shadow-green-100 hover:scale-105 active:scale-95'
-                  }`}
-                >
-                  Analyze <Icons.Send />
-                </button>
-              </div>
-            </div>
-
-            {/* Local DB Search Results */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {results.length > 0 && (
-                <div className="space-y-2">
-                  <div className="px-2 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Quick Add from Database</div>
-                  {results.map(food => (
-                    <div 
-                      key={food.id} 
-                      onClick={() => setSelectedFood(food)}
-                      className="p-3 sm:p-4 rounded-2xl hover:bg-green-50 active:bg-green-100 cursor-pointer border border-transparent hover:border-green-100 transition-all flex justify-between items-center group"
-                    >
-                      <div>
-                        <div className="font-bold text-gray-800 text-sm sm:text-base group-hover:text-primary transition-colors">{food.name}</div>
-                        <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5">{food.defaultPortionGrams}g • {Math.round(food.nutrientsPerGram.calories * food.defaultPortionGrams)} kcal</div>
-                      </div>
-                      <div className="text-gray-300 group-hover:text-primary transition-colors">
-                        <Icons.Plus />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {results.length === 0 && query.length > 1 && !isAnalyzing && !selectedImage && (
-                <div className="text-center mt-12 px-4">
-                   <p className="text-gray-400 font-medium text-sm">No direct database matches.</p>
-                   <p className="text-gray-300 text-xs mt-1">Tap <span className="font-bold text-primary">Analyze</span> to let AI handle it.</p>
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          /* Food Quantity Adjustment View */
-          <div className="flex-1 flex flex-col">
-            <div className="flex-1 overflow-y-auto">
-              <h4 className="text-lg sm:text-xl font-bold text-gray-800 mb-1">{selectedFood.name}</h4>
-              <p className="text-xs sm:text-sm text-gray-500 mb-6 sm:mb-8">{selectedFood.category}</p>
-              
-              <div className="flex items-center gap-4 mb-8">
-                <button 
-                  onClick={() => setQuantity(Math.max(10, quantity - 10))}
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-100 flex items-center justify-center text-lg sm:text-xl font-bold text-gray-600 active:bg-gray-200"
-                >-</button>
-                <div className="flex-1 text-center">
-                  <div className="text-3xl sm:text-4xl font-black text-primary">{quantity}</div>
-                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest">Grams</div>
-                </div>
-                <button 
-                  onClick={() => setQuantity(quantity + 10)}
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-100 flex items-center justify-center text-lg sm:text-xl font-bold text-gray-600 active:bg-gray-200"
-                >+</button>
-              </div>
-
-              <div className="bg-gray-50 p-4 sm:p-6 rounded-2xl grid grid-cols-2 gap-4 text-center">
-                <div>
-                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase">Calories</div>
-                  <div className="text-lg sm:text-xl font-black text-gray-800">
-                    {Math.round(selectedFood.nutrientsPerGram.calories * quantity)}
-                  </div>
-                </div>
-                 <div>
-                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase">Protein</div>
-                  <div className="text-lg sm:text-xl font-black text-gray-800">
-                    {(selectedFood.nutrientsPerGram.protein * quantity).toFixed(1)}g
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3 sm:gap-4 pt-4 mt-auto">
-              <button onClick={() => setSelectedFood(null)} className="flex-1 py-3 sm:py-4 bg-gray-100 rounded-2xl font-bold text-gray-600 text-sm sm:text-base">Back</button>
-              <button onClick={handleLocalAdd} className="flex-[2] py-3 sm:py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 text-sm sm:text-base">Add Meal</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const MacroEditor = ({ current, onSave, onClose }: { current: NutritionTargets, onSave: (t: NutritionTargets) => void, onClose: () => void }) => {
-  const [targets, setTargets] = useState(current);
-
-  const handleChange = (field: keyof NutritionTargets, value: any) => {
-    setTargets(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleSave = () => {
-    onSave(targets);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200 p-4">
-      <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl relative">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold text-gray-900">Edit Nutrition Goals</h3>
-          <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Daily Calories</label>
-            <input 
-              type="number" 
-              value={targets.calories}
-              onChange={(e) => handleChange('calories', Number(e.target.value))}
-              className="w-full p-4 bg-gray-50 rounded-2xl font-black text-2xl text-gray-900 border-2 border-transparent focus:border-primary/20 outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-               <label className="block text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Protein (g)</label>
-               <input 
-                  type="number" 
-                  value={targets.protein}
-                  onChange={(e) => handleChange('protein', Number(e.target.value))}
-                  className="w-full p-3 bg-blue-50 rounded-xl font-bold text-blue-900 border-none outline-none text-center"
-               />
-            </div>
-            <div>
-               <label className="block text-[10px] font-bold text-yellow-500 uppercase tracking-widest mb-1">Carbs (g)</label>
-               <input 
-                  type="number" 
-                  value={targets.carbs}
-                  onChange={(e) => handleChange('carbs', Number(e.target.value))}
-                  className="w-full p-3 bg-yellow-50 rounded-xl font-bold text-yellow-900 border-none outline-none text-center"
-               />
-            </div>
-            <div>
-               <label className="block text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-1">Fat (g)</label>
-               <input 
-                  type="number" 
-                  value={targets.fat}
-                  onChange={(e) => handleChange('fat', Number(e.target.value))}
-                  className="w-full p-3 bg-purple-50 rounded-xl font-bold text-purple-900 border-none outline-none text-center"
-               />
-            </div>
-          </div>
-        </div>
-
-        <button 
-          onClick={handleSave}
-          className="w-full mt-8 py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-[0.98] transition-all"
-        >
-          Save Changes
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const ResultSummary = ({ items, onUpdate, onConfirm, onCancel, isSubmitting }: { items: MealItem[], onUpdate: (items: MealItem[]) => void, onConfirm: () => void, onCancel: () => void, isSubmitting: boolean }) => {
-  const totalCalories = items.reduce((sum, item) => sum + item.nutrients.calories, 0);
-
-  const handleRemove = (index: number) => {
-    const newItems = [...items];
-    newItems.splice(index, 1);
-    if (newItems.length === 0) {
-      onCancel();
-    } else {
-      onUpdate(newItems);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[5000] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-lg md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl flex flex-col max-h-[90vh]">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h3 className="text-xl font-bold text-gray-900">Meal Summary</h3>
-            <p className="text-sm text-gray-500 font-medium">{items.length} items detected</p>
-          </div>
-          <div className="text-right">
-             <div className="text-2xl font-black text-primary">{Math.round(totalCalories)}</div>
-             <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total kcal</div>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar mb-6">
-          {items.map((item, idx) => (
-            <div key={idx} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
-              <div>
-                <div className="font-bold text-gray-800">{item.portionLabel}</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {item.nutrients.protein}p • {item.nutrients.carbs}c • {item.nutrients.fat}f
-                  {item.nutrients.sourceDatabase === 'AI' && <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded text-[9px] font-bold uppercase">AI Est.</span>}
-                </div>
-                {item.nutrients.micros && item.nutrients.micros.length > 0 && (
-                   <div className="flex flex-wrap gap-1 mt-1.5">
-                      {item.nutrients.micros.slice(0, 2).map((m, i) => (
-                         <span key={i} className="text-[9px] bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-500">{m}</span>
-                      ))}
-                   </div>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                 <div className="font-black text-gray-900">{item.nutrients.calories}</div>
-                 <button onClick={() => handleRemove(idx)} className="p-2 text-gray-400 hover:text-red-500 bg-white rounded-xl shadow-sm">
-                    <Icons.Trash />
-                 </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-4">
-          <button onClick={onCancel} disabled={isSubmitting} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold disabled:opacity-50">Discard</button>
-          <button 
-            onClick={onConfirm} 
-            disabled={isSubmitting}
-            className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 flex items-center justify-center gap-2 disabled:opacity-70 disabled:shadow-none transition-all"
-          >
-            {isSubmitting ? (
-              <>
-                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                 Saving...
-              </>
-            ) : (
-              <>Confirm Meal <Icons.Check /></>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+import { ManualEntryModal } from './components/ManualEntryModal';
+import { ResultSummary } from './components/ResultSummary';
+import { MacroEditor } from './components/MacroEditor';
+import { Icons } from './components/Icons';
 
 // --- View Components ---
 
@@ -553,7 +61,7 @@ const HomeView = ({
         <div className="space-y-6">
           <div>
             <div className="flex justify-between items-end mb-3">
-              <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest">Calories</span>
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Calories</span>
               <div className="text-right">
                 <span className="text-3xl sm:text-4xl font-black text-gray-900">{log.totalNutrients.calories}</span>
                 <span className="text-sm sm:text-lg font-bold text-gray-300 mx-2">/</span>
@@ -676,6 +184,7 @@ const HistoryView = ({ log }: { log: DailyLog }) => (
 const ProfileView = ({ profile, onUpdateProfile }: { profile: UserProfile, onUpdateProfile: (p: UserProfile) => void }) => {
   const [isEditingKey, setIsEditingKey] = useState(false);
   const [newKey, setNewKey] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const handleDisconnect = () => {
     if (window.confirm("Disconnecting will disable AI features. Continue?")) {
@@ -688,6 +197,42 @@ const ProfileView = ({ profile, onUpdateProfile }: { profile: UserProfile, onUpd
     onUpdateProfile({ ...profile, apiKey: newKey.trim() });
     setIsEditingKey(false);
     setNewKey('');
+  };
+
+  const handleExport = async () => {
+    try {
+      const blob = await exportUserData();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nutritrack_backup_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Export failed");
+    }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (!window.confirm("This will overwrite your current data. Are you sure?")) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const json = event.target?.result as string;
+        await importUserData(json);
+        alert("Data imported successfully! Reloading...");
+        window.location.reload();
+      } catch (err) {
+        alert("Import failed. Invalid file format.");
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -705,10 +250,38 @@ const ProfileView = ({ profile, onUpdateProfile }: { profile: UserProfile, onUpd
             </div>
         </div>
 
+        {/* Data Management Section (HIGH-002) */}
+        <div className="bg-white p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-gray-50 shadow-sm">
+           <h3 className="font-bold text-gray-800 mb-4 text-sm sm:text-base">Data Management</h3>
+           <div className="flex gap-4">
+              <button 
+                onClick={handleExport}
+                className="flex-1 flex items-center justify-center gap-2 p-3 bg-gray-50 hover:bg-gray-100 rounded-xl font-bold text-gray-600 text-sm transition-colors"
+              >
+                <Icons.Download /> Backup Data
+              </button>
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 p-3 bg-gray-50 hover:bg-gray-100 rounded-xl font-bold text-gray-600 text-sm transition-colors"
+              >
+                <Icons.Upload /> Restore Data
+              </button>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept=".json" 
+                onChange={handleImport} 
+              />
+           </div>
+           <p className="text-xs text-gray-400 mt-2">
+             Save your data regularly to prevent loss if browser cache is cleared.
+           </p>
+        </div>
+
         {/* API Key Management Section */}
         <div className="bg-white p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-gray-50 shadow-sm">
             <h3 className="font-bold text-gray-800 mb-4 text-sm sm:text-base flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
               AI Settings
             </h3>
             
@@ -884,18 +457,11 @@ const App: React.FC = () => {
     setDetectedItems(items); // Open summary for confirmation
   };
 
-  const confirmMeal = async () => {
+  const confirmMeal = async (mealType: Meal['mealType']) => {
     if (!detectedItems || !log) return;
     setIsSubmittingMeal(true);
     
     try {
-        // Determine meal type based on time
-        const hour = new Date().getHours();
-        let mealType: Meal['mealType'] = 'Snack';
-        if (hour >= 5 && hour < 11) mealType = 'Breakfast';
-        else if (hour >= 11 && hour < 16) mealType = 'Lunch';
-        else if (hour >= 16 && hour < 22) mealType = 'Dinner';
-
         // Collect all micros for the daily aggregation (HIGH-002 FIX)
         const mealMicros: string[] = [];
         detectedItems.forEach(item => {
@@ -921,7 +487,6 @@ const App: React.FC = () => {
         };
         
         // Explicitly set the collected micros on the meal total for the DB to pick up
-        // Note: The reducer above initializes to empty, so we override it here with all unique micros from the items
         meal.totalNutrients.micros = Array.from(new Set(mealMicros));
 
         await saveMeal(meal);
