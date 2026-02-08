@@ -67,10 +67,14 @@ export const parseAIJson = <T>(text: string): T => {
 
 /**
  * HIGH-FIDELITY OPTIMIZATION
- * Resizes image to max 1024px to ensure fast upload and processing.
- * 1024px is the sweet spot for Gemini Flash (detail vs latency).
+ * Resizes image to max 800px at 0.7 quality.
+ * 
+ * WHY 800px?
+ * Gemini Flash Vision performs excellently even at 512px-800px.
+ * Reducing from 1024px to 800px reduces pixel count by ~40%,
+ * drastically speeding up upload and reducing "Busy" errors.
  */
-export const resizeImage = (dataUrl: string, maxSize = 1024, quality = 0.8): Promise<string> => {
+export const resizeImage = (dataUrl: string, maxSize = 800, quality = 0.7): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {

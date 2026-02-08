@@ -91,29 +91,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       const optimizedDataUrl = await resizeImage(rawDataUrl);
       const base64Image = optimizedDataUrl.split(',')[1];
 
-      // Robust Prompt
+      // Robust Prompt (Shortened for token efficiency)
       const prompt = `
-        Look at this food.
-        1. Identify the items. Guess if unsure (e.g., "Mixed Vegetable Curry").
-        2. Estimate portion size in grams.
-        3. Estimate nutrition (Calories, Protein, Carbs, Fat, Fiber).
-        
-        Return STRICT JSON array. DO NOT use Markdown formatting. DO NOT wrap in \`\`\`json.
-        Example: [{"name":"Apple","grams":150,"calories":80,"protein":0.4,"carbs":21,"fat":0.3,"fiber":3.6,"micros":[]}]
-        
-        JSON Structure:
-        [
-          {
-            "name": "string",
-            "grams": number,
-            "calories": number,
-            "protein": number,
-            "carbs": number,
-            "fat": number,
-            "fiber": number,
-            "micros": ["string"]
-          }
-        ]
+        Identify foods, portion grams, and nutrition (cal,prot,carb,fat,fib).
+        Return JSON array: [{"name":str,"grams":num,"calories":num,"protein":num,"carbs":num,"fat":num,"fiber":num,"micros":[str]}]
       `;
 
       // Use Robust Wrapper (Backoff + Caching)
