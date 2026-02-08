@@ -28,7 +28,6 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
     }
   }, [query, selectedImage, isAnalyzing]);
 
-  // Fix HIGH-001: Reset quantity when food is selected
   useEffect(() => {
     if (selectedFood) {
       setQuantity(selectedFood.defaultPortionGrams);
@@ -38,7 +37,6 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
   const handleLocalAdd = () => {
     if (!selectedFood) return;
     
-    // Fix CRIT-001: Catch sanity check errors
     try {
       const nutrients = nutritionCalculator.calculateNutrients(selectedFood.id, quantity);
       const item: MealItem = {
@@ -85,15 +83,21 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
         Analyze this meal. Text description: "${query}". 
         Identify all food items. For each item, estimate the weight in grams and provide nutrition data.
         
-        Return a JSON array with keys: 
-        name (string), 
-        grams (number), 
-        calories (number), 
-        protein (number), 
-        carbs (number), 
-        fat (number), 
-        fiber (number),
-        micros (array of strings).
+        Return STRICT JSON array. DO NOT use Markdown formatting. DO NOT wrap in \`\`\`json.
+        
+        JSON Structure: 
+        [
+          {
+            "name": "string", 
+            "grams": number, 
+            "calories": number, 
+            "protein": number, 
+            "carbs": number, 
+            "fat": number, 
+            "fiber": number,
+            "micros": ["string"]
+          }
+        ]
       `;
 
       // Use Robust Wrapper
@@ -134,6 +138,8 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
          alert("Authentication failed. Please check your Gemini API Key in Profile.");
       } else if (msg.includes("413") || msg.includes("payload")) {
          alert("Image is too large. The system attempted to resize it but it's still too big. Try a smaller image.");
+      } else if (msg.includes("SAFETY")) {
+         alert("AI blocked the analysis due to safety filters. Please try a different image/description.");
       } else {
          alert(`Failed to analyze meal. Error: ${msg}.`);
       }

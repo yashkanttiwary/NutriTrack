@@ -83,10 +83,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
 
       ctx.drawImage(video, 0, 0);
       
-      // Get raw high-res image
+      // Get raw image
       const rawDataUrl = canvas.toDataURL('image/jpeg', 0.9);
       
-      // OPTIMIZATION: Use helper to resize safely (1280px @ 0.8)
+      // OPTIMIZATION: Use helper to resize safely
       // Preserves detail for AI while preventing 4MB payload failures
       const optimizedDataUrl = await resizeImage(rawDataUrl);
       const base64Image = optimizedDataUrl.split(',')[1];
@@ -98,7 +98,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         2. Estimate portion size in grams.
         3. Estimate nutrition (Calories, Protein, Carbs, Fat, Fiber).
         
-        Return STRICT JSON array:
+        Return STRICT JSON array. DO NOT use Markdown formatting. DO NOT wrap in \`\`\`json.
+        Example: [{"name":"Apple","grams":150,"calories":80,"protein":0.4,"carbs":21,"fat":0.3,"fiber":3.6,"micros":[]}]
+        
+        JSON Structure:
         [
           {
             "name": "string",
@@ -179,9 +182,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       if (eStr.includes("API Key")) msg = "Check API Key in Profile.";
       else if (eStr.includes("403")) msg = "Auth failed. Check API Key.";
       else if (eStr.includes("404")) msg = "AI Model unavailable.";
-      else if (eStr.includes("503")) msg = "Server busy. Try again.";
-      else if (eStr.includes("Safety")) msg = "Image blocked by safety filters.";
-      else if (eStr.includes("retries")) msg = "Connection unstable. Try again.";
+      else if (eStr.includes("429")) msg = "AI is busy. Please try again in 10s.";
+      else if (eStr.includes("timed out")) msg = "Network too slow. Try again.";
+      else if (eStr.includes("SAFETY")) msg = "Image blocked by safety filters.";
+      else if (eStr.includes("No food detected")) msg = "No food identified. Try a clearer angle.";
       
       setError(msg);
     } finally {
@@ -229,6 +233,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
                 <div className="bg-black/60 backdrop-blur-md p-6 rounded-3xl flex flex-col items-center gap-4 animate-in zoom-in duration-300">
                    <div className="w-14 h-14 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
                    <p className="text-white font-bold tracking-wide text-sm">Analyzing...</p>
+                   <p className="text-white/60 text-xs">This may take a moment</p>
                 </div>
              </div>
            )}

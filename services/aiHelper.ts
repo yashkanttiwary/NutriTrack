@@ -21,6 +21,7 @@ export const createGenAIClient = (apiKey: string): GoogleGenAI => {
 
 /**
  * Utility to robustly parse JSON from AI models.
+ * Handles Markdown fences, conversational wrappers, and partial failures.
  */
 export const parseAIJson = <T>(text: string): T => {
   if (!text) throw new Error("AI returned empty response.");
@@ -31,8 +32,9 @@ export const parseAIJson = <T>(text: string): T => {
   // 2. Attempt Direct Parse
   try {
     return JSON.parse(cleaned) as T;
-  } catch {
-    // 3. Intelligent Extraction (Find first '[' or '{' and last ']' or '}')
+  } catch (e) {
+    // 3. Intelligent Extraction (Find the outer-most array)
+    // This handles cases where AI says: "Here is the data: [...]"
     const firstBracket = cleaned.indexOf('[');
     const lastBracket = cleaned.lastIndexOf(']');
     
@@ -40,9 +42,12 @@ export const parseAIJson = <T>(text: string): T => {
       try {
         const potentialJson = cleaned.substring(firstBracket, lastBracket + 1);
         return JSON.parse(potentialJson) as T;
-      } catch {}
+      } catch (innerE) {
+        // Continue to object extraction
+      }
     }
 
+    // 4. Object Extraction (Find the outer-most object)
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
     
@@ -50,7 +55,9 @@ export const parseAIJson = <T>(text: string): T => {
       try {
         const potentialJson = cleaned.substring(firstBrace, lastBrace + 1);
         return JSON.parse(potentialJson) as T;
-      } catch {}
+      } catch (innerE) {
+        // Continue to error
+      }
     }
 
     console.error("JSON Parse Failed. Input:", text);
@@ -60,10 +67,10 @@ export const parseAIJson = <T>(text: string): T => {
 
 /**
  * HIGH-FIDELITY OPTIMIZATION
- * Resizes image to max 1280px (HD) at 0.8 quality.
- * Preserves detail while significantly reducing payload size compared to raw 12MP photos.
+ * Resizes image to max 1024px to ensure fast upload and processing.
+ * 1024px is the sweet spot for Gemini Flash (detail vs latency).
  */
-export const resizeImage = (dataUrl: string, maxSize = 1280, quality = 0.8): Promise<string> => {
+export const resizeImage = (dataUrl: string, maxSize = 1024, quality = 0.8): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -86,7 +93,7 @@ export const resizeImage = (dataUrl: string, maxSize = 1280, quality = 0.8): Pro
           return reject(new Error("Canvas context initialization failed"));
       }
 
-      // Use better interpolation if browser supports it
+      // Use better interpolation
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, w, h);
@@ -100,11 +107,9 @@ export const resizeImage = (dataUrl: string, maxSize = 1280, quality = 0.8): Pro
 
 /**
  * Generates a SHA-256 hash of the input for caching purposes.
- * This ensures we don't re-process the exact same image + prompt combination.
  */
 async function generateRequestHash(prompt: string, imageBase64: string): Promise<string> {
-  // Use first 5kb of image string + length + prompt to create unique key
-  // We use partial string to keep hashing fast, length prevents collision on patterns
+  // Hash the prompt + a sample of the image to be efficient
   const keyData = prompt + imageBase64.length + imageBase64.slice(0, 5000) + imageBase64.slice(-100);
   
   const msgBuffer = new TextEncoder().encode(keyData);
@@ -119,9 +124,9 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * ROBUST API CALL WRAPPER
  * Implements:
  * 1. Caching (Idempotency)
- * 2. Exponential Backoff
- * 3. Jitter
- * 4. Automatic retry on 429/503
+ * 2. Exponential Backoff with High Base Delay (friendly to Rate Limits)
+ * 3. Client-side Timeout (prevents hanging)
+ * 4. Safety Check Handling
  */
 export const analyzeImageWithRetry = async (
   apiKey: string,
@@ -142,12 +147,22 @@ export const analyzeImageWithRetry = async (
 
   const ai = createGenAIClient(apiKey);
   const maxRetries = 3;
-  const baseDelay = 1000;
+  // Increased base delay to 2s to better handle strict rate limits
+  const baseDelay = 2000; 
+  // 30s timeout for mobile networks
+  const TIMEOUT_MS = 30000; 
+  
   let attempt = 0;
 
   while (attempt <= maxRetries) {
     try {
-      const response = await ai.models.generateContent({
+      // Create a timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error("Request timed out")), TIMEOUT_MS)
+      );
+
+      // Create the API promise
+      const apiPromise = ai.models.generateContent({
         model: modelName,
         contents: [
           {
@@ -157,11 +172,25 @@ export const analyzeImageWithRetry = async (
             ]
           }
         ],
-        config: { responseMimeType: "application/json" }
+        config: { 
+          responseMimeType: "application/json",
+          // Add safety settings if necessary, though defaults are usually fine
+        }
       });
 
+      // Race against the timeout
+      const response = await Promise.race([apiPromise, timeoutPromise]);
+
+      // Safety Block Check
+      if (!response.text && response.candidates && response.candidates[0]?.finishReason) {
+        const reason = response.candidates[0].finishReason;
+        if (reason === 'SAFETY' || reason === 'BLOCKLIST') {
+          throw new Error(`AI blocked this image for safety reasons (${reason}).`);
+        }
+      }
+
       const text = response.text;
-      if (!text) throw new Error("Empty response from AI");
+      if (!text) throw new Error("Empty response from AI (No text generated).");
 
       // 2. Save to Cache on Success
       await db.apiCache.put({
@@ -174,15 +203,27 @@ export const analyzeImageWithRetry = async (
 
     } catch (error: any) {
       const msg = error.message || String(error);
-      const isRetryable = msg.includes("429") || msg.includes("503") || msg.includes("500") || msg.includes("fetch failed");
+      
+      // Determine if retryable
+      const isRateLimit = msg.includes("429") || msg.includes("Quota");
+      const isServerOverload = msg.includes("503") || msg.includes("500") || msg.includes("overloaded");
+      const isNetworkError = msg.includes("fetch failed") || msg.includes("network") || msg.includes("timed out");
+      
+      // Non-retryable errors
+      if (msg.includes("API Key") || msg.includes("403") || msg.includes("SAFETY")) {
+        throw error;
+      }
+
+      const isRetryable = isRateLimit || isServerOverload || isNetworkError;
 
       if (attempt === maxRetries || !isRetryable) {
-        throw error; // Fatal error or max retries reached
+        console.error("Fatal API Error:", error);
+        throw error;
       }
 
       // 3. Exponential Backoff with Jitter
       // Delay = Base * 2^attempt + random_jitter
-      const delay = baseDelay * Math.pow(2, attempt) + (Math.random() * 500);
+      const delay = baseDelay * Math.pow(2, attempt) + (Math.random() * 1000);
       
       console.warn(`⚠️ API Request failed (Attempt ${attempt + 1}/${maxRetries}). Retrying in ${Math.round(delay)}ms... Error: ${msg}`);
       await wait(delay);
@@ -190,5 +231,5 @@ export const analyzeImageWithRetry = async (
     }
   }
   
-  throw new Error("Maximum retries exceeded. Please check your internet connection.");
+  throw new Error("Maximum retries exceeded. The server is busy or connection is unstable.");
 };
