@@ -31,7 +31,7 @@ export const parseAIJson = <T>(text: string): T => {
   // 2. Attempt Direct Parse
   try {
     return JSON.parse(cleaned) as T;
-  } catch (e) {
+  } catch {
     // 3. Intelligent Extraction (Find first '[' or '{' and last ']' or '}')
     const firstBracket = cleaned.indexOf('[');
     const lastBracket = cleaned.lastIndexOf(']');
@@ -40,7 +40,7 @@ export const parseAIJson = <T>(text: string): T => {
       try {
         const potentialJson = cleaned.substring(firstBracket, lastBracket + 1);
         return JSON.parse(potentialJson) as T;
-      } catch (e2) {}
+      } catch {}
     }
 
     const firstBrace = cleaned.indexOf('{');
@@ -50,7 +50,7 @@ export const parseAIJson = <T>(text: string): T => {
       try {
         const potentialJson = cleaned.substring(firstBrace, lastBrace + 1);
         return JSON.parse(potentialJson) as T;
-      } catch (e3) {}
+      } catch {}
     }
 
     console.error("JSON Parse Failed. Input:", text);
@@ -93,7 +93,7 @@ export const resizeImage = (dataUrl: string, maxSize = 1280, quality = 0.8): Pro
       
       resolve(canvas.toDataURL('image/jpeg', quality));
     };
-    img.onerror = (e) => reject(new Error("Image load failed for resizing"));
+    img.onerror = () => reject(new Error("Image load failed for resizing"));
     img.src = dataUrl;
   });
 };
