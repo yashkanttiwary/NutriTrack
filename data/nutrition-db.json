@@ -1,0 +1,105 @@
+{
+  "version": "2024.1",
+  "lastUpdated": "2024-02-01",
+  "foods": [
+    {
+      "id": "ifct_001",
+      "name": "Roti (Whole Wheat)",
+      "nameAliases": ["Chapati", "Phulka", "Wheat Bread", "Fulka"],
+      "category": "Grains",
+      "nutrientsPerGram": {
+        "calories": 3.0,
+        "protein": 0.10,
+        "carbs": 0.60,
+        "fat": 0.05,
+        "fiber": 0.10
+      },
+      "defaultPortionGrams": 40,
+      "portions": [
+        { "id": "p_r1", "label": "1 piece (medium)", "grams": 40, "unit": "pieces" },
+        { "id": "p_r2", "label": "2 pieces", "grams": 80, "unit": "pieces" },
+        { "id": "p_r3", "label": "3 pieces", "grams": 120, "unit": "pieces" },
+        { "id": "p_r4", "label": "4 pieces", "grams": 160, "unit": "pieces" }
+      ],
+      "source": "IFCT"
+    },
+    {
+      "id": "ifct_002",
+      "name": "Dal (Moong, cooked)",
+      "nameAliases": ["Moong Dal", "Yellow Lentil", "Green Gram Dal"],
+      "category": "Proteins",
+      "nutrientsPerGram": {
+        "calories": 1.2,
+        "protein": 0.08,
+        "carbs": 0.16,
+        "fat": 0.027,
+        "fiber": 0.04
+      },
+      "defaultPortionGrams": 150,
+      "portions": [
+        { "id": "p_d1", "label": "1 katori (150ml)", "grams": 150, "unit": "katori" },
+        { "id": "p_d2", "label": "1 cup (240ml)", "grams": 240, "unit": "cup" },
+        { "id": "p_d3", "label": "2 tbsp", "grams": 30, "unit": "tbsp" }
+      ],
+      "source": "IFCT"
+    },
+    {
+      "id": "ifct_003",
+      "name": "White Rice (Cooked)",
+      "nameAliases": ["Chawal", "Steamed Rice", "Basmati Rice"],
+      "category": "Grains",
+      "nutrientsPerGram": {
+        "calories": 1.3,
+        "protein": 0.027,
+        "carbs": 0.28,
+        "fat": 0.003,
+        "fiber": 0.004
+      },
+      "defaultPortionGrams": 150,
+      "portions": [
+        { "id": "p_ric1", "label": "1 katori", "grams": 150, "unit": "katori" },
+        { "id": "p_ric2", "label": "1 cup", "grams": 200, "unit": "cup" },
+        { "id": "p_ric3", "label": "1 plate", "grams": 300, "unit": "bowl" }
+      ],
+      "source": "IFCT"
+    },
+    {
+      "id": "ifct_004",
+      "name": "Paneer Curry",
+      "nameAliases": ["Paneer Butter Masala", "Shahi Paneer", "Paneer Sabzi"],
+      "category": "Mixed",
+      "nutrientsPerGram": {
+        "calories": 2.5,
+        "protein": 0.12,
+        "carbs": 0.08,
+        "fat": 0.20,
+        "fiber": 0.01
+      },
+      "defaultPortionGrams": 200,
+      "portions": [
+        { "id": "p_pan1", "label": "1 katori", "grams": 200, "unit": "katori" },
+        { "id": "p_pan2", "label": "1 serving", "grams": 250, "unit": "bowl" }
+      ],
+      "source": "IFCT"
+    },
+     {
+      "id": "ifct_005",
+      "name": "Banana",
+      "nameAliases": ["Kela", "Fruit"],
+      "category": "Fruits",
+      "nutrientsPerGram": {
+        "calories": 0.89,
+        "protein": 0.011,
+        "carbs": 0.228,
+        "fat": 0.003,
+        "fiber": 0.026
+      },
+      "defaultPortionGrams": 118,
+      "portions": [
+        { "id": "p_ban1", "label": "1 medium", "grams": 118, "unit": "medium" },
+        { "id": "p_ban2", "label": "1 large", "grams": 136, "unit": "large" }
+      ],
+      "source": "IFCT"
+    }
+  ]
+}

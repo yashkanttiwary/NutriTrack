@@ -1,0 +1,7 @@
+{
+  "name": "NutriTrack",
+  "description": "Indian-first mobile PWA for tracking food nutrition via live camera detection using local-first processing.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
