@@ -611,6 +611,26 @@ const ProfileView = ({ profile }: { profile: UserProfile }) => (
              </div>
         </div>
 
+        {profile.targets && (
+            <div className="bg-white p-6 rounded-[2rem] border border-gray-50">
+                <h3 className="font-bold text-gray-800 mb-4">Your Daily Plan</h3>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                        <div className="text-xs text-gray-400 uppercase">Protein</div>
+                        <div className="font-bold text-gray-900">{profile.targets.protein}g</div>
+                    </div>
+                    <div>
+                        <div className="text-xs text-gray-400 uppercase">Carbs</div>
+                        <div className="font-bold text-gray-900">{profile.targets.carbs}g</div>
+                    </div>
+                    <div>
+                         <div className="text-xs text-gray-400 uppercase">Fat</div>
+                        <div className="font-bold text-gray-900">{profile.targets.fat}g</div>
+                    </div>
+                </div>
+            </div>
+        )}
+
         <div className="bg-primary/10 p-8 rounded-[2.5rem] border border-primary/20">
              <h3 className="text-lg font-bold text-primary mb-2">Premium Features</h3>
              <p className="text-sm text-primary/80 mb-4">Upgrade to unlock advanced macronutrient analytics and unlimited meal history.</p>
@@ -639,13 +659,6 @@ const App: React.FC = () => {
       if (profile) setUserProfile(profile);
       const todayLog = await getTodayLog();
       
-      // If we have a profile but log targets are default, update them
-      if (profile && todayLog.targets.calories === 2000 && todayLog.meals.length === 0) {
-         // Simple re-calc logic similar to onboarding to keep sync
-         // In a real app, calculateTargets should be a shared utility
-         // For now, we assume Onboarding set the targets correctly initially.
-      }
-      
       setLog(todayLog);
       setLoading(false);
     }
@@ -653,10 +666,14 @@ const App: React.FC = () => {
   }, [detectedItems]);
 
   const handleOnboardingComplete = async (data: Omit<UserProfile, 'id'>) => {
+    // 1. Save profile to DB
     const savedProfile = await saveUserProfile(data);
     setUserProfile(savedProfile);
-    // Also set initial targets based on the calculation done in onboarding (we should ideally pass them here, but for now let's assume standard defaults or user updates later)
-    // For better UX, let's trigger a reload or just let it flow
+    
+    // 2. Update today's log with the new targets immediately
+    await updateDailyTargets(savedProfile.targets);
+    const updatedLog = await getTodayLog();
+    setLog(updatedLog);
   };
 
   const updateTarget = async (newVal: number) => {
@@ -832,7 +849,7 @@ const App: React.FC = () => {
 const MacroStat = ({ label, val, target, color }: { label: string, val: number, target: number, color: string }) => (
   <div className={`p-3 rounded-2xl text-center flex flex-col items-center ${color.split(' ')[0]}`}>
     <span className="text-[9px] font-bold uppercase tracking-widest mb-1 opacity-60">{label}</span>
-    <span className={`text-sm font-black ${color.split(' ')[1]}`}>{val}g</span>
+    <span className={`text-sm font-black ${color.split(' ')[1]}`}>{val} / {target}g</span>
     <div className="w-full h-1 bg-white/50 rounded-full mt-2 overflow-hidden">
       <div 
         className={`h-full ${color.split(' ')[1].replace('text', 'bg')} transition-all duration-1000`}

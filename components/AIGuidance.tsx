@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { UserProfile, DailyLog } from '../types';
+import { UserProfile, DailyLog, ChatMessage } from '../types';
+import { getChatHistory, saveChatMessage } from '../services/db';
 
 interface AIGuidanceProps {
   apiKey: string;
@@ -8,16 +9,9 @@ interface AIGuidanceProps {
   dailyLog: DailyLog;
 }
 
-interface Message {
-  role: 'user' | 'model';
-  text: string;
-}
-
 export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dailyLog }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'model', text: `Hi ${userProfile.name}! I'm your nutrition coach. How can I help you reach your goal to ${userProfile.goal.toLowerCase()}?` }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -27,35 +21,77 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
   };
 
   useEffect(() => {
+    // Load history on mount
+    async function loadHistory() {
+      const history = await getChatHistory();
+      if (history.length > 0) {
+        setMessages(history);
+      } else {
+        // Initial Greeting if no history
+        const initialMsg: ChatMessage = {
+          role: 'model',
+          text: `Hi ${userProfile.name}! I've prepared your nutrition plan based on your goal to ${userProfile.goal.toLowerCase()}. You can ask me anything about your diet or health!`,
+          timestamp: Date.now()
+        };
+        saveChatMessage('model', initialMsg.text);
+        setMessages([initialMsg]);
+      }
+    }
+    loadHistory();
+  }, [userProfile.name]);
+
+  useEffect(() => {
     if (isOpen) scrollToBottom();
   }, [messages, isOpen]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
 
-    const userMsg = input.trim();
+    const userMsgText = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    
+    // Optimistic UI update
+    const userMsg: ChatMessage = { role: 'user', text: userMsgText, timestamp: Date.now() };
+    setMessages(prev => [...prev, userMsg]);
     setLoading(true);
 
     try {
+      await saveChatMessage('user', userMsgText);
+
       const ai = new GoogleGenAI({ apiKey });
       
-      // Construct context
+      // Construct context with Plan Explanation and History
+      const historyContext = messages.slice(-5).map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${m.text}`).join('\n');
+      
       const context = `
+        System: You are a friendly, knowledgeable nutrition coach for ${userProfile.name}.
+        
         User Profile:
-        Name: ${userProfile.name}
-        Goal: ${userProfile.goal}
-        Stats: ${userProfile.age}yo, ${userProfile.heightCm}cm, ${userProfile.weightKg}kg.
+        - Goal: ${userProfile.goal}
+        - Stats: ${userProfile.age}yo, ${userProfile.heightCm}cm, ${userProfile.weightKg}kg
+        - Diet: ${userProfile.dietaryPreference}
+        - Medical: ${userProfile.medicalConditions || "None"}
         
-        Today's Log:
-        Calories: ${dailyLog.totalNutrients.calories} / ${dailyLog.targets.calories}
-        Protein: ${dailyLog.totalNutrients.protein}g / ${dailyLog.targets.protein}g
-        Meals: ${dailyLog.meals.map(m => m.mealType + ': ' + m.items.map(i => i.portionLabel).join(', ')).join(' | ')}
+        Current Plan Targets:
+        - Calories: ${dailyLog.targets.calories}
+        - Protein: ${dailyLog.targets.protein}g
+        - Carbs: ${dailyLog.targets.carbs}g
+        - Fat: ${dailyLog.targets.fat}g
         
-        Question: ${userMsg}
+        Initial Plan Logic: ${userProfile.planExplanation || "N/A"}
+
+        Today's Log So Far:
+        - Calories: ${dailyLog.totalNutrients.calories} / ${dailyLog.targets.calories}
+        - Protein: ${dailyLog.totalNutrients.protein}g
+        - Carbs: ${dailyLog.totalNutrients.carbs}g
+        - Fat: ${dailyLog.totalNutrients.fat}g
         
-        Answer as a friendly, concise nutrition coach. Keep answers under 3 sentences unless asked for detail.
+        Recent Chat History:
+        ${historyContext}
+        
+        Current User Question: ${userMsgText}
+        
+        Task: Answer as the nutrition coach. Be encouraging. Keep answers under 3-4 sentences unless detailed explanation is requested.
       `;
 
       const response = await ai.models.generateContent({
@@ -63,12 +99,15 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
         contents: [{ role: 'user', parts: [{ text: context }] }],
       });
 
-      const reply = response.text || "I'm having trouble thinking right now. Try again?";
+      const replyText = response.text || "I'm having trouble thinking right now. Try again?";
       
-      setMessages(prev => [...prev, { role: 'model', text: reply }]);
+      await saveChatMessage('model', replyText);
+      setMessages(prev => [...prev, { role: 'model', text: replyText, timestamp: Date.now() }]);
+
     } catch (error) {
       console.error(error);
-      setMessages(prev => [...prev, { role: 'model', text: "Connection error. Please check your API key or internet." }]);
+      const errorMsg = "Connection error. Please check your API key or internet.";
+      setMessages(prev => [...prev, { role: 'model', text: errorMsg, timestamp: Date.now() }]);
     } finally {
       setLoading(false);
     }

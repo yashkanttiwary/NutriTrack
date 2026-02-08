@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { UserProfile, Gender, ActivityLevel, Goal, DietaryPreference } from '../types';
+import { UserProfile, Gender, ActivityLevel, Goal, DietaryPreference, NutritionTargets } from '../types';
 
 interface OnboardingProps {
   onComplete: (profile: Omit<UserProfile, 'id'>) => void;
@@ -22,11 +22,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   });
 
   const [planData, setPlanData] = useState<{
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    fiber: number;
+    targets: NutritionTargets;
     explanation: string;
   } | null>(null);
 
@@ -66,11 +62,13 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     const fat = Math.round((calories * 0.35) / 9);
     
     return {
-      calories,
-      protein,
-      carbs,
-      fat,
-      fiber: 30,
+      targets: {
+        calories,
+        protein,
+        carbs,
+        fat,
+        fiber: 30
+      },
       explanation: "Calculated based on standard BMR (Mifflin-St Jeor) and activity multipliers. Adjusted for your specific goal."
     };
   };
@@ -121,7 +119,16 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
       
       // Basic validation
       if (result.calories && result.protein) {
-        setPlanData(result);
+        setPlanData({
+            targets: {
+                calories: result.calories,
+                protein: result.protein,
+                carbs: result.carbs,
+                fat: result.fat,
+                fiber: result.fiber
+            },
+            explanation: result.explanation
+        });
       } else {
         throw new Error("Invalid AI response");
       }
@@ -138,6 +145,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     if (!planData) return;
     onComplete({
       ...data,
+      targets: planData.targets,
+      planExplanation: planData.explanation,
       createdAt: Date.now()
     });
   };
@@ -365,22 +374,22 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                  </div>
                  <p className="text-gray-500 font-medium mb-1">Daily Calorie Target</p>
-                 <div className="text-5xl font-black text-primary">{planData.calories}</div>
+                 <div className="text-5xl font-black text-primary">{planData.targets.calories}</div>
                  <div className="text-sm font-bold text-primary/60 uppercase tracking-widest mt-1">kcal / day</div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
                  <div className="bg-blue-50 p-4 rounded-2xl text-center">
                     <div className="text-xs font-bold text-blue-400 uppercase">Protein</div>
-                    <div className="text-xl font-black text-blue-600">{planData.protein}g</div>
+                    <div className="text-xl font-black text-blue-600">{planData.targets.protein}g</div>
                  </div>
                  <div className="bg-yellow-50 p-4 rounded-2xl text-center">
                     <div className="text-xs font-bold text-yellow-500 uppercase">Carbs</div>
-                    <div className="text-xl font-black text-yellow-600">{planData.carbs}g</div>
+                    <div className="text-xl font-black text-yellow-600">{planData.targets.carbs}g</div>
                  </div>
                  <div className="bg-purple-50 p-4 rounded-2xl text-center">
                     <div className="text-xs font-bold text-purple-400 uppercase">Fat</div>
-                    <div className="text-xl font-black text-purple-600">{planData.fat}g</div>
+                    <div className="text-xl font-black text-purple-600">{planData.targets.fat}g</div>
                  </div>
               </div>
 

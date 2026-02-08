@@ -1,22 +1,23 @@
-
 import { Dexie, type Table } from 'dexie';
-import { Meal, DailyLog, Nutrients, UserProfile } from '../types';
+import { Meal, DailyLog, Nutrients, UserProfile, ChatMessage } from '../types';
 
 // Define the database class extending Dexie to leverage built-in methods
 class NutritionDatabase extends Dexie {
   meals!: Table<Meal>;
   dailyLogs!: Table<DailyLog>;
   userProfile!: Table<UserProfile>;
+  chatMessages!: Table<ChatMessage>;
 
   constructor() {
     super('NutriTrackDB');
     
     // Define schema
-    // Added userProfile
-    (this as any).version(2).stores({
+    // Version 3: Added chatMessages
+    (this as any).version(3).stores({
       meals: 'id, timestamp, mealType', 
       dailyLogs: 'date',
-      userProfile: 'id' 
+      userProfile: 'id',
+      chatMessages: '++id, timestamp' 
     });
   }
 }
@@ -34,6 +35,20 @@ export async function saveUserProfile(profile: Omit<UserProfile, 'id'>) {
   const fullProfile: UserProfile = { ...profile, id: 'current_user' };
   await db.userProfile.put(fullProfile);
   return fullProfile;
+}
+
+// --- Chat Helpers ---
+
+export async function saveChatMessage(role: 'user' | 'model', text: string) {
+  await db.chatMessages.add({
+    role,
+    text,
+    timestamp: Date.now()
+  });
+}
+
+export async function getChatHistory(): Promise<ChatMessage[]> {
+  return await db.chatMessages.orderBy('timestamp').toArray();
 }
 
 // --- Meal Helpers ---
@@ -66,18 +81,23 @@ export async function getTodayLog(): Promise<DailyLog> {
   
   if (log) return log;
 
+  // If no log exists for today, try to get targets from user profile
+  const profile = await getUserProfile();
+  
+  const defaultTargets = profile?.targets || {
+    calories: 2000,
+    protein: 80,
+    carbs: 250,
+    fat: 60,
+    fiber: 30
+  };
+
   // Return default if not exists (don't save yet to avoid empty DB writes until action)
   return {
     date: dateStr,
     meals: [],
     totalNutrients: createZeroNutrients(),
-    targets: {
-      calories: 2000, // Will be overwritten if user profile exists ideally, but fallback here
-      protein: 80,
-      carbs: 250,
-      fat: 60,
-      fiber: 30
-    }
+    targets: defaultTargets
   };
 }
 
@@ -119,7 +139,9 @@ async function updateDailyLog(date: Date) {
     
   // Get existing targets to preserve them
   const existingLog = await db.dailyLogs.get(dateStr);
-  const targets = existingLog?.targets || {
+  const profile = await getUserProfile();
+  
+  const targets = existingLog?.targets || profile?.targets || {
     calories: 2000,
     protein: 80,
     carbs: 250,

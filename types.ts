@@ -45,6 +45,14 @@ export type ActivityLevel = "Sedentary" | "Light" | "Moderate" | "Active" | "Ver
 export type Goal = "Lose Weight" | "Maintain" | "Gain Muscle";
 export type DietaryPreference = "Vegetarian" | "Non-Vegetarian" | "Eggetarian" | "Vegan" | "Jain";
 
+export interface NutritionTargets {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+}
+
 export interface UserProfile {
   id: string; // 'current_user'
   name: string;
@@ -58,6 +66,18 @@ export interface UserProfile {
   dietaryPreference: DietaryPreference;
   medicalConditions: string;
   createdAt: number;
+  // AI Generated Plan Persistence
+  targets: NutritionTargets; 
+  planExplanation: string;
+}
+
+// ============ CHAT ============
+
+export interface ChatMessage {
+  id?: number; // Auto-increment for DB
+  role: 'user' | 'model';
+  text: string;
+  timestamp: number;
 }
 
 // ============ DETECTION & TRACKING ============
@@ -107,11 +127,5 @@ export interface DailyLog {
   date: string;                // YYYY-MM-DD
   meals: Meal[];
   totalNutrients: Nutrients;
-  targets: {
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    fiber: number;
-  };
+  targets: NutritionTargets;
 }
