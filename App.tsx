@@ -74,6 +74,32 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
     }
   };
 
+  // Helper to resize image to avoid payload too large errors
+  const resizeImage = (dataUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800; // Resize to max 800px width
+        const scale = Math.min(1, MAX_WIDTH / img.width);
+        
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // Compress to JPEG 70% quality
+            resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+        } else {
+            // Fallback if canvas fails
+            resolve(dataUrl); 
+        }
+      };
+      img.src = dataUrl;
+    });
+  };
+
   const analyzeWithAI = async () => {
     if ((!query && !selectedImage) || isAnalyzing) return;
     
@@ -83,13 +109,13 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
       
       const parts: any[] = [];
       if (selectedImage) {
-        // Robustly extract mime type and data from Data URL
-        const [meta, data] = selectedImage.split(',');
-        const mimeType = meta.split(':')[1].split(';')[0];
+        // Resize image to safe dimensions/format (fixes 413 Payload Too Large and unsupported types)
+        const resizedImage = await resizeImage(selectedImage);
+        const data = resizedImage.split(',')[1];
         
         parts.push({
           inlineData: {
-            mimeType: mimeType, 
+            mimeType: 'image/jpeg', 
             data: data
           }
         });
@@ -147,12 +173,12 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
 
     } catch (error: any) {
       console.error("AI Error:", error);
-      // More helpful error message for user
       const msg = error.message || "";
       if (msg.includes("API_KEY") || msg.includes("403")) {
          alert("Authentication failed. Please check your Gemini API Key in Profile.");
       } else {
-         alert("Failed to analyze meal. Please check your internet connection.");
+         // Show specific error message for better debugging
+         alert(`Failed to analyze meal: ${msg || "Unknown error"}. Please check your internet connection.`);
       }
     } finally {
       setIsAnalyzing(false);
