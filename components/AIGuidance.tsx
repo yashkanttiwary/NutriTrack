@@ -97,8 +97,9 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
         Task: Answer as the nutrition coach. Be encouraging. Keep answers under 3-4 sentences unless detailed explanation is requested.
       `;
 
+      // Use Flash model instead of Pro to ensure availability and consistency with Onboarding
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: [{ role: 'user', parts: [{ text: context }] }],
       });
 
@@ -108,13 +109,22 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
       setMessages(prev => [...prev, { role: 'model', text: replyText, timestamp: Date.now() }]);
 
     } catch (error: any) {
-      console.error(error);
+      console.error("AI Error:", error);
       let errorMsg = "Connection error. Please check your internet.";
       
-      if (error.message.includes("API Key")) {
+      // Robust error message parsing
+      const msg = error.message || error.toString();
+      
+      if (msg.includes("API Key")) {
          errorMsg = "Please configure your API Key in settings.";
-      } else if (error.toString().includes("403")) {
+      } else if (msg.includes("403")) {
          errorMsg = "API Key authentication failed.";
+      } else if (msg.includes("404")) {
+         errorMsg = "The AI model is currently unavailable. Please try again later.";
+      } else if (msg.includes("503")) {
+         errorMsg = "AI service is overloaded. Please try again in a moment.";
+      } else if (msg.length > 0 && msg.length < 100) {
+         errorMsg = `Error: ${msg}`; // Show specific error if it's short/readable
       }
       
       setMessages(prev => [...prev, { role: 'model', text: errorMsg, timestamp: Date.now() }]);
