@@ -14,7 +14,7 @@ export interface Nutrients {
   carbs: number;        // grams
   fat: number;          // grams
   fiber: number;        // grams
-  sourceDatabase: "IFCT" | "USDA" | "Custom"; // CRITICAL: Traceability
+  sourceDatabase: "IFCT" | "USDA" | "Custom" | "AI"; // CRITICAL: Traceability
 }
 
 export interface PortionPreset {

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getTodayLog, updateDailyTargets, saveMeal } from './services/db';
 import { APP_CONFIG } from './constants';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DailyLog, MealItem, Meal, FoodItem } from './types';
 import { CameraScanner } from './components/CameraScanner';
 import { nutritionCalculator } from './services/NutritionCalculator';
+import { GoogleGenAI } from "@google/genai";
 
 // --- Premium Icons (Custom SVGs) ---
 const Icons = {
@@ -16,26 +17,32 @@ const Icons = {
   Flame: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>,
   Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>,
   X: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
-  Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+  Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
+  Image: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
+  Send: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
 };
 
 // --- Modals ---
 
-const ManualEntryModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (item: MealItem) => void }) => {
+const ManualEntryModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (items: MealItem[]) => void }) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FoodItem[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
   const [quantity, setQuantity] = useState(100); // grams
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (query.trim().length > 1) {
+    // Only search local DB if it looks like a simple food name (no spaces or short)
+    if (query.trim().length > 1 && !selectedImage && !isAnalyzing) {
       setResults(nutritionCalculator.searchFoods(query));
     } else {
       setResults([]);
     }
-  }, [query]);
+  }, [query, selectedImage, isAnalyzing]);
 
-  const handleAdd = () => {
+  const handleLocalAdd = () => {
     if (!selectedFood) return;
     const nutrients = nutritionCalculator.calculateNutrients(selectedFood.id, quantity);
     const item: MealItem = {
@@ -47,50 +54,177 @@ const ManualEntryModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (ite
       confidence: "high", // manual entry is accurate
       manuallyAdded: true
     };
-    onAdd(item);
+    onAdd([item]);
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const analyzeWithAI = async () => {
+    if ((!query && !selectedImage) || isAnalyzing) return;
+    
+    setIsAnalyzing(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      
+      const parts: any[] = [];
+      if (selectedImage) {
+        parts.push({
+          inlineData: {
+            mimeType: 'image/jpeg', // Assuming jpeg for simplicity, or detect from data URI
+            data: selectedImage.split(',')[1]
+          }
+        });
+      }
+      
+      const promptText = `Analyze this meal. Text description: "${query}". Identify all food items. For each item, estimate the weight in grams and provide nutrition data (Calories, Protein, Carbs, Fat, Fiber). If specific values aren't known, estimate based on standard Indian portions. Return a JSON array with keys: name (string), grams (number), calories (number), protein (number), carbs (number), fat (number), fiber (number).`;
+      parts.push({ text: promptText });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: [{ parts }],
+        config: { responseMimeType: "application/json" }
+      });
+
+      const rawJson = JSON.parse(response.text || "[]");
+      const items: MealItem[] = rawJson.map((item: any) => ({
+        id: Math.random().toString(36).substr(2, 9),
+        foodId: 'ai_' + Math.random().toString(36).substr(2, 5),
+        portionGrams: item.grams,
+        portionLabel: `${item.grams}g ${item.name}`,
+        nutrients: {
+          calories: item.calories,
+          protein: item.protein,
+          carbs: item.carbs,
+          fat: item.fat,
+          fiber: item.fiber,
+          sourceDatabase: "AI"
+        },
+        confidence: "medium",
+        manuallyAdded: true
+      }));
+
+      if (items.length > 0) {
+        onAdd(items);
+      } else {
+        alert("AI could not identify any food. Please try again.");
+      }
+
+    } catch (error) {
+      console.error("AI Error:", error);
+      alert("Failed to analyze meal. Please check your connection.");
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-md md:rounded-[2.5rem] rounded-t-[2.5rem] p-8 shadow-2xl h-[80vh] flex flex-col">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-2xl font-bold text-gray-900">Add Food</h3>
+      <div className="bg-white w-full max-w-md md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl h-[85vh] flex flex-col">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-2xl font-bold text-gray-900">Log Meal</h3>
           <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
         </div>
 
         {!selectedFood ? (
           <>
-            <div className="relative mb-6">
-              <input 
-                type="text" 
-                placeholder="Search food (e.g., Roti, Dal)..." 
-                className="w-full p-4 pl-12 bg-gray-50 rounded-2xl border border-gray-100 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+            {/* Smart Input Section */}
+            <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100 mb-6 transition-all focus-within:border-primary/30 focus-within:ring-4 focus-within:ring-primary/5">
+              <textarea
+                placeholder="Describe your meal (e.g. '2 idli with sambar') or search database..."
+                className="w-full bg-transparent border-none focus:ring-0 text-gray-800 placeholder-gray-400 resize-none h-20 text-lg leading-relaxed"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 autoFocus
               />
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                <Icons.Search />
+              
+              {selectedImage && (
+                <div className="relative mt-2 mb-4 w-20 h-20">
+                  <img src={selectedImage} alt="Preview" className="w-full h-full object-cover rounded-xl border border-gray-200" />
+                  <button 
+                    onClick={() => setSelectedImage(null)}
+                    className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-red-500"
+                  >
+                    <Icons.X />
+                  </button>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center mt-2">
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 text-primary bg-white rounded-xl shadow-sm border border-gray-100 hover:bg-green-50 transition-colors"
+                  >
+                    <Icons.Image />
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept="image/*"
+                    onChange={handleImageSelect}
+                  />
+                </div>
+                
+                <button 
+                  onClick={analyzeWithAI}
+                  disabled={isAnalyzing || (!query && !selectedImage)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${
+                    isAnalyzing || (!query && !selectedImage)
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-primary text-white shadow-lg shadow-green-100 hover:scale-105 active:scale-95'
+                  }`}
+                >
+                  {isAnalyzing ? (
+                    <>Analyzing...</>
+                  ) : (
+                    <>Analyze <Icons.Send /></>
+                  )}
+                </button>
               </div>
             </div>
-            
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
-              {results.length === 0 && query.length > 1 && (
-                <div className="text-center text-gray-400 mt-8">No results found.</div>
-              )}
-              {results.map(food => (
-                <div 
-                  key={food.id} 
-                  onClick={() => setSelectedFood(food)}
-                  className="p-4 rounded-xl hover:bg-green-50 active:bg-green-100 cursor-pointer border border-transparent hover:border-green-100 transition-all"
-                >
-                  <div className="font-bold text-gray-800">{food.name}</div>
-                  <div className="text-xs text-gray-500 mt-1">{food.defaultPortionGrams}g serving • {food.nutrientsPerGram.calories * food.defaultPortionGrams} kcal</div>
+
+            {/* Local DB Search Results */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {results.length > 0 && (
+                <div className="space-y-2">
+                  <div className="px-2 text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Quick Add from Database</div>
+                  {results.map(food => (
+                    <div 
+                      key={food.id} 
+                      onClick={() => setSelectedFood(food)}
+                      className="p-4 rounded-2xl hover:bg-green-50 active:bg-green-100 cursor-pointer border border-transparent hover:border-green-100 transition-all flex justify-between items-center group"
+                    >
+                      <div>
+                        <div className="font-bold text-gray-800 group-hover:text-primary transition-colors">{food.name}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">{food.defaultPortionGrams}g • {Math.round(food.nutrientsPerGram.calories * food.defaultPortionGrams)} kcal</div>
+                      </div>
+                      <div className="text-gray-300 group-hover:text-primary transition-colors">
+                        <Icons.Plus />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+              {results.length === 0 && query.length > 1 && !isAnalyzing && !selectedImage && (
+                <div className="text-center mt-12">
+                   <p className="text-gray-400 font-medium">No direct database matches.</p>
+                   <p className="text-gray-300 text-sm mt-1">Tap <span className="font-bold text-primary">Analyze</span> to let AI handle it.</p>
+                </div>
+              )}
             </div>
           </>
         ) : (
+          /* Food Quantity Adjustment View */
           <div className="flex-1 flex flex-col">
             <div className="flex-1">
               <h4 className="text-xl font-bold text-gray-800 mb-1">{selectedFood.name}</h4>
@@ -129,7 +263,7 @@ const ManualEntryModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (ite
 
             <div className="flex gap-4 pt-4">
               <button onClick={() => setSelectedFood(null)} className="flex-1 py-4 bg-gray-100 rounded-2xl font-bold text-gray-600">Back</button>
-              <button onClick={handleAdd} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100">Add Meal</button>
+              <button onClick={handleLocalAdd} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100">Add Meal</button>
             </div>
           </div>
         )}
@@ -458,9 +592,9 @@ const App: React.FC = () => {
     setDetectedItems(items);
   };
 
-  const handleManualAdd = (item: MealItem) => {
+  const handleManualAdd = (items: MealItem[]) => {
     setIsManualAdd(false);
-    setDetectedItems([item]); // Open summary for confirmation
+    setDetectedItems(items); // Open summary for confirmation
   };
 
   const confirmMeal = async () => {
