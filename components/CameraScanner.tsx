@@ -55,6 +55,12 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
   const captureAndDetect = async () => {
     if (!videoRef.current || !canvasRef.current || isProcessing) return;
 
+    // Check if video is actually ready
+    if (videoRef.current.readyState < 2) {
+       // Not enough data yet
+       return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
@@ -62,20 +68,44 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       // 1. Validate Client First
       const ai = createGenAIClient(apiKey);
 
-      // 2. Capture Image
+      // 2. Capture Image with Resizing
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      
+      // Resize to reasonable dimensions (Max 1024px) to prevent payload too large errors
+      const MAX_SIZE = 1024;
+      let w = video.videoWidth;
+      let h = video.videoHeight;
+      
+      if (w === 0 || h === 0) {
+         throw new Error("Camera not ready yet.");
+      }
+
+      if (w > MAX_SIZE || h > MAX_SIZE) {
+        const ratio = Math.min(MAX_SIZE / w, MAX_SIZE / h);
+        w *= ratio;
+        h *= ratio;
+      }
+
+      canvas.width = w;
+      canvas.height = h;
+      
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error("Could not initialize canvas");
 
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+      ctx.drawImage(video, 0, 0, w, h);
+      
+      // Compress to JPEG 0.7 quality to further reduce size
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      const base64Image = dataUrl.split(',')[1];
 
-      // 3. AI Request
+      if (!base64Image) {
+         throw new Error("Failed to capture image data.");
+      }
+
+      // 3. AI Request - Use Flash model for faster vision tasks
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: [
           {
             parts: [
@@ -135,6 +165,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         setError(err.message);
       } else if (err.toString().includes("403")) {
         setError("API Key rejected. Please check your key in Profile.");
+      } else if (err.toString().includes("413") || err.toString().includes("Request Entity Too Large")) {
+        setError("Image too large. Please move camera closer or try again.");
       } else {
         setError("Analysis failed. Please try again.");
       }
@@ -163,7 +195,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
           <div className="px-4 py-2 bg-black/40 backdrop-blur-md rounded-2xl text-white text-xs font-bold uppercase tracking-widest border border-white/10">
-            {isProcessing ? "Gemini Pro Analyzing..." : "Ready to Scan"}
+            {isProcessing ? "Gemini Analyzing..." : "Ready to Scan"}
           </div>
           <div className="w-10" /> {/* Spacer */}
         </div>

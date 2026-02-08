@@ -152,8 +152,9 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
       `;
       parts.push({ text: promptText });
 
+      // Use Flash model for speed/reliability on mobile
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: [{ parts }],
         config: { responseMimeType: "application/json" }
       });
