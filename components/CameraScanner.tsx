@@ -6,9 +6,10 @@ import { MealItem } from '../types';
 interface CameraScannerProps {
   onClose: () => void;
   onResult: (items: MealItem[]) => void;
+  apiKey: string;
 }
 
-export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult }) => {
+export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult, apiKey }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -68,7 +69,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
       const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
       // UPDATED: Using gemini-3-pro-preview for better reasoning capabilities
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: [
@@ -123,7 +124,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult 
       }
     } catch (err) {
       console.error(err);
-      setError("AI Analysis failed. Please try again.");
+      setError("AI Analysis failed. Please check your API key.");
     } finally {
       setIsProcessing(false);
     }

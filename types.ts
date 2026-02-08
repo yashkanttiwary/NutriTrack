@@ -37,6 +37,25 @@ export interface FoodItem {
   version: string;               // "2024.1"
 }
 
+// ============ USER PROFILE ============
+
+export type Gender = "Male" | "Female" | "Other";
+export type ActivityLevel = "Sedentary" | "Light" | "Moderate" | "Active" | "Very Active";
+export type Goal = "Lose Weight" | "Maintain" | "Gain Muscle";
+
+export interface UserProfile {
+  id: string; // 'current_user'
+  name: string;
+  apiKey: string;
+  gender: Gender;
+  age: number;
+  heightCm: number;
+  weightKg: number;
+  activityLevel: ActivityLevel;
+  goal: Goal;
+  createdAt: number;
+}
+
 // ============ DETECTION & TRACKING ============
 
 export interface BoundingBox {

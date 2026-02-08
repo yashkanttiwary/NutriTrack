@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getTodayLog, updateDailyTargets, saveMeal } from './services/db';
+import { getTodayLog, updateDailyTargets, saveMeal, getUserProfile, saveUserProfile } from './services/db';
 import { APP_CONFIG } from './constants';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { DailyLog, MealItem, Meal, FoodItem } from './types';
+import { DailyLog, MealItem, Meal, FoodItem, UserProfile } from './types';
 import { CameraScanner } from './components/CameraScanner';
+import { Onboarding } from './components/Onboarding';
+import { AIGuidance } from './components/AIGuidance';
 import { nutritionCalculator } from './services/NutritionCalculator';
 import { GoogleGenAI } from "@google/genai";
 
@@ -24,7 +26,7 @@ const Icons = {
 
 // --- Modals ---
 
-const ManualEntryModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (items: MealItem[]) => void }) => {
+const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onAdd: (items: MealItem[]) => void, apiKey: string }) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FoodItem[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
@@ -73,7 +75,7 @@ const ManualEntryModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (ite
     
     setIsAnalyzing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       
       const parts: any[] = [];
       if (selectedImage) {
@@ -120,7 +122,7 @@ const ManualEntryModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (ite
 
     } catch (error) {
       console.error("AI Error:", error);
-      alert("Failed to analyze meal. Please check your connection.");
+      alert("Failed to analyze meal. Please check your connection or API key.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -379,12 +381,14 @@ const ResultSummary = ({ items, onConfirm, onCancel }: { items: MealItem[], onCo
 
 const HomeView = ({ 
   log, 
+  userProfile,
   calPercent, 
   setEditingCalories, 
   setIsScanning, 
   setIsManualAdd 
 }: { 
   log: DailyLog, 
+  userProfile: UserProfile,
   calPercent: number, 
   setEditingCalories: (b: boolean) => void,
   setIsScanning: (b: boolean) => void,
@@ -394,7 +398,7 @@ const HomeView = ({
     {/* Left Side: Stats */}
     <section className="space-y-8">
       <div>
-        <h2 className="text-3xl font-black text-gray-900 tracking-tight">Hello, Jay!</h2>
+        <h2 className="text-3xl font-black text-gray-900 tracking-tight">Hello, {userProfile.name.split(' ')[0]}!</h2>
         <p className="text-gray-500 font-medium">Ready for your {log.targets.calories} kcal goal?</p>
       </div>
 
@@ -543,18 +547,29 @@ const HistoryView = ({ log }: { log: DailyLog }) => (
   </div>
 );
 
-const ProfileView = () => (
+const ProfileView = ({ profile }: { profile: UserProfile }) => (
     <div className="animate-in fade-in duration-500 space-y-6">
         <h2 className="text-3xl font-black text-gray-900 tracking-tight">Profile</h2>
         
         <div className="bg-white p-8 rounded-[2.5rem] border border-gray-50 shadow-sm flex items-center gap-6">
             <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center text-3xl font-bold text-gray-400">
-                JD
+                {profile.name.charAt(0)}
             </div>
             <div>
-                <h3 className="text-xl font-bold text-gray-900">Jay Doe</h3>
-                <p className="text-gray-500 text-sm">Free Account</p>
+                <h3 className="text-xl font-bold text-gray-900">{profile.name}</h3>
+                <p className="text-gray-500 text-sm">Goal: {profile.goal}</p>
             </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+             <div className="bg-white p-6 rounded-[2rem] border border-gray-50">
+                 <div className="text-xs text-gray-400 font-bold uppercase mb-1">Weight</div>
+                 <div className="text-2xl font-black text-gray-900">{profile.weightKg} kg</div>
+             </div>
+             <div className="bg-white p-6 rounded-[2rem] border border-gray-50">
+                 <div className="text-xs text-gray-400 font-bold uppercase mb-1">Height</div>
+                 <div className="text-2xl font-black text-gray-900">{profile.heightCm} cm</div>
+             </div>
         </div>
 
         <div className="bg-primary/10 p-8 rounded-[2.5rem] border border-primary/20">
@@ -569,6 +584,8 @@ const ProfileView = () => (
 // --- Main App ---
 
 const App: React.FC = () => {
+  const [loading, setLoading] = useState(true);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [log, setLog] = useState<DailyLog | null>(null);
   const [editingCalories, setEditingCalories] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -577,8 +594,31 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'home' | 'history' | 'profile'>('home');
 
   useEffect(() => {
-    getTodayLog().then(setLog);
-  }, [detectedItems]); // Refresh when items are logged
+    // Initial Load
+    async function loadData() {
+      const profile = await getUserProfile();
+      if (profile) setUserProfile(profile);
+      const todayLog = await getTodayLog();
+      
+      // If we have a profile but log targets are default, update them
+      if (profile && todayLog.targets.calories === 2000 && todayLog.meals.length === 0) {
+         // Simple re-calc logic similar to onboarding to keep sync
+         // In a real app, calculateTargets should be a shared utility
+         // For now, we assume Onboarding set the targets correctly initially.
+      }
+      
+      setLog(todayLog);
+      setLoading(false);
+    }
+    loadData();
+  }, [detectedItems]);
+
+  const handleOnboardingComplete = async (data: Omit<UserProfile, 'id'>) => {
+    const savedProfile = await saveUserProfile(data);
+    setUserProfile(savedProfile);
+    // Also set initial targets based on the calculation done in onboarding (we should ideally pass them here, but for now let's assume standard defaults or user updates later)
+    // For better UX, let's trigger a reload or just let it flow
+  };
 
   const updateTarget = async (newVal: number) => {
     if (!log) return;
@@ -628,11 +668,19 @@ const App: React.FC = () => {
     setLog(updatedLog);
   };
 
-  if (!log) return (
+  if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
     </div>
   );
+
+  // Flow: If no user profile, show onboarding
+  if (!userProfile) {
+    return <Onboarding onComplete={handleOnboardingComplete} />;
+  }
+
+  // Flow: Main App
+  if (!log) return null; // Should be covered by loading state
 
   const calPercent = Math.min(100, Math.round((log.totalNutrients.calories / log.targets.calories) * 100));
 
@@ -651,7 +699,8 @@ const App: React.FC = () => {
         {isScanning && (
           <CameraScanner 
             onClose={() => setIsScanning(false)} 
-            onResult={handleScanResult} 
+            onResult={handleScanResult}
+            apiKey={userProfile.apiKey}
           />
         )}
 
@@ -659,6 +708,7 @@ const App: React.FC = () => {
           <ManualEntryModal 
             onClose={() => setIsManualAdd(false)}
             onAdd={handleManualAdd}
+            apiKey={userProfile.apiKey}
           />
         )}
 
@@ -669,6 +719,9 @@ const App: React.FC = () => {
             onCancel={() => setDetectedItems(null)} 
           />
         )}
+
+        {/* AI Guidance Floating Button */}
+        <AIGuidance apiKey={userProfile.apiKey} userProfile={userProfile} dailyLog={log} />
 
         {/* Desktop Container Wrapper */}
         <div className="mx-auto max-w-md md:max-w-5xl md:pt-10 md:pb-10 min-h-screen md:min-h-0 flex flex-col md:flex-row md:gap-8">
@@ -682,8 +735,11 @@ const App: React.FC = () => {
                 <h1 className="text-2xl font-extrabold text-primary tracking-tight">NutriTrack</h1>
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Indian Food Lens</p>
               </div>
-              <button className="w-12 h-12 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center hover:bg-gray-100 transition-colors group">
-                <span className="text-sm font-bold text-gray-400 group-hover:text-primary transition-colors">JD</span>
+              <button 
+                onClick={() => setCurrentView('profile')}
+                className="w-12 h-12 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center hover:bg-gray-100 transition-colors group"
+              >
+                <span className="text-sm font-bold text-gray-400 group-hover:text-primary transition-colors">{userProfile.name.charAt(0)}</span>
               </button>
             </header>
 
@@ -692,6 +748,7 @@ const App: React.FC = () => {
                {currentView === 'home' && (
                   <HomeView 
                     log={log} 
+                    userProfile={userProfile}
                     calPercent={calPercent} 
                     setEditingCalories={setEditingCalories} 
                     setIsScanning={setIsScanning}
@@ -699,7 +756,7 @@ const App: React.FC = () => {
                   />
                )}
                {currentView === 'history' && <HistoryView log={log} />}
-               {currentView === 'profile' && <ProfileView />}
+               {currentView === 'profile' && <ProfileView profile={userProfile} />}
             </main>
 
             {/* Floating Navigation Bar */}

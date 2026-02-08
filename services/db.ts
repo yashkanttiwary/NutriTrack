@@ -1,20 +1,22 @@
 
 import { Dexie, type Table } from 'dexie';
-import { Meal, DailyLog, Nutrients } from '../types';
+import { Meal, DailyLog, Nutrients, UserProfile } from '../types';
 
 // Define the database class extending Dexie to leverage built-in methods
 class NutritionDatabase extends Dexie {
   meals!: Table<Meal>;
   dailyLogs!: Table<DailyLog>;
+  userProfile!: Table<UserProfile>;
 
   constructor() {
     super('NutriTrackDB');
     
-    // Define schema: this.version and this.stores are inherited from Dexie
-    // Fix: Explicitly cast to any to resolve "Property 'version' does not exist" compilation error
-    (this as any).version(1).stores({
-      meals: 'id, timestamp, mealType', // Primary key and indexed props
-      dailyLogs: 'date'
+    // Define schema
+    // Added userProfile
+    (this as any).version(2).stores({
+      meals: 'id, timestamp, mealType', 
+      dailyLogs: 'date',
+      userProfile: 'id' 
     });
   }
 }
@@ -22,10 +24,23 @@ class NutritionDatabase extends Dexie {
 // Create a single instance of the database
 export const db = new NutritionDatabase();
 
+// --- User Profile Helpers ---
+
+export async function getUserProfile(): Promise<UserProfile | undefined> {
+  return await db.userProfile.get('current_user');
+}
+
+export async function saveUserProfile(profile: Omit<UserProfile, 'id'>) {
+  const fullProfile: UserProfile = { ...profile, id: 'current_user' };
+  await db.userProfile.put(fullProfile);
+  return fullProfile;
+}
+
+// --- Meal Helpers ---
+
 // Helper to save a meal with transaction support for atomicity
 export async function saveMeal(meal: Meal) {
   // Use the transaction method from the Dexie instance
-  // Fix: Explicitly cast to any to resolve "Property 'transaction' does not exist" compilation error
   return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     await db.meals.add(meal);
     await updateDailyLog(meal.timestamp);
@@ -35,7 +50,6 @@ export async function saveMeal(meal: Meal) {
 // Helper to delete a meal and update the daily log
 export async function deleteMeal(id: string) {
   // Use the transaction method from the Dexie instance
-  // Fix: Explicitly cast to any to resolve "Property 'transaction' does not exist" compilation error
   return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     const meal = await db.meals.get(id);
     if (!meal) return;
@@ -58,7 +72,7 @@ export async function getTodayLog(): Promise<DailyLog> {
     meals: [],
     totalNutrients: createZeroNutrients(),
     targets: {
-      calories: 2000,
+      calories: 2000, // Will be overwritten if user profile exists ideally, but fallback here
       protein: 80,
       carbs: 250,
       fat: 60,
@@ -72,7 +86,6 @@ export async function updateDailyTargets(targets: DailyLog['targets']) {
   const dateStr = new Date().toISOString().split('T')[0];
   
   // Use the transaction method from the Dexie instance
-  // Fix: Explicitly cast to any to resolve "Property 'transaction' does not exist" compilation error
   await (db as any).transaction('rw', [db.dailyLogs], async () => {
     const log = await db.dailyLogs.get(dateStr);
     if (log) {
