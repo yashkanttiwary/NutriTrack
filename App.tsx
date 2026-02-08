@@ -74,28 +74,42 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
     }
   };
 
-  // Helper to resize image to avoid payload too large errors
+  // Helper to resize image to avoid payload too large errors while retaining details
   const resizeImage = (dataUrl: string): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800; // Resize to max 800px width
-        const scale = Math.min(1, MAX_WIDTH / img.width);
-        
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            // Compress to JPEG 70% quality
-            resolve(canvas.toDataURL('image/jpeg', 0.7)); 
-        } else {
-            // Fallback if canvas fails
-            resolve(dataUrl); 
+        try {
+          const canvas = document.createElement('canvas');
+          // Increase max width to 1024 to retain more detail while keeping payload safe
+          const MAX_DIMENSION = 1024;
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+            const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
+            width *= ratio;
+            height *= ratio;
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+              ctx.drawImage(img, 0, 0, width, height);
+              // Compress to JPEG 80% quality (better detail retention)
+              resolve(canvas.toDataURL('image/jpeg', 0.8)); 
+          } else {
+              // Fallback if canvas fails
+              resolve(dataUrl); 
+          }
+        } catch (e) {
+          console.error("Image resizing failed:", e);
+          resolve(dataUrl);
         }
       };
+      img.onerror = () => resolve(dataUrl);
       img.src = dataUrl;
     });
   };
@@ -103,13 +117,20 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
   const analyzeWithAI = async () => {
     if ((!query && !selectedImage) || isAnalyzing) return;
     
+    // API Key Validation
+    const cleanKey = apiKey ? apiKey.trim() : "";
+    if (!cleanKey) {
+      alert("API Key is invalid or missing. Please check your Profile.");
+      return;
+    }
+
     setIsAnalyzing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey: cleanKey });
       
       const parts: any[] = [];
       if (selectedImage) {
-        // Resize image to safe dimensions/format (fixes 413 Payload Too Large and unsupported types)
+        // Resize image to safe dimensions/format
         const resizedImage = await resizeImage(selectedImage);
         const data = resizedImage.split(',')[1];
         
@@ -173,12 +194,15 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
 
     } catch (error: any) {
       console.error("AI Error:", error);
-      const msg = error.message || "";
+      const msg = error.message || String(error);
+      
       if (msg.includes("API_KEY") || msg.includes("403")) {
          alert("Authentication failed. Please check your Gemini API Key in Profile.");
+      } else if (msg.includes("413") || msg.includes("payload")) {
+         alert("Image is too large. The system attempted to resize it but it's still too big. Try a smaller image.");
       } else {
          // Show specific error message for better debugging
-         alert(`Failed to analyze meal: ${msg || "Unknown error"}. Please check your internet connection.`);
+         alert(`Failed to analyze meal. Error: ${msg}. Please check your internet connection.`);
       }
     } finally {
       setIsAnalyzing(false);
@@ -346,72 +370,68 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
 const MacroEditor = ({ current, onSave, onClose }: { current: NutritionTargets, onSave: (t: NutritionTargets) => void, onClose: () => void }) => {
   const [targets, setTargets] = useState(current);
 
-  const handleChange = (field: keyof NutritionTargets, value: number) => {
+  const handleChange = (field: keyof NutritionTargets, value: any) => {
     setTargets(prev => ({ ...prev, [field]: value }));
   };
-  
+
+  const handleSave = () => {
+    onSave(targets);
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-sm rounded-[2rem] p-6 sm:p-8 shadow-2xl relative">
-        <button onClick={onClose} className="absolute right-5 top-5 sm:right-6 sm:top-6 p-2 bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
-          <Icons.X />
-        </button>
-        <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Edit Goals</h3>
-        <p className="text-gray-500 mb-6 text-xs sm:text-sm">Fine-tune your daily targets.</p>
-        
-        <div className="space-y-5 sm:space-y-6">
-          {/* Calories */}
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200 p-4">
+      <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl relative">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">Edit Nutrition Goals</h3>
+          <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
+        </div>
+
+        <div className="space-y-4">
           <div>
-            <div className="flex justify-between items-center mb-1">
-               <label className="text-xs sm:text-sm font-bold text-gray-600 uppercase">Calories</label>
-               <span className="text-xl sm:text-2xl font-black text-primary">{targets.calories}</span>
-            </div>
+            <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Daily Calories</label>
             <input 
-              type="range" 
-              min="1200" max="4000" step="50"
+              type="number" 
               value={targets.calories}
               onChange={(e) => handleChange('calories', Number(e.target.value))}
-              className="w-full h-2 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-primary"
+              className="w-full p-4 bg-gray-50 rounded-2xl font-black text-2xl text-gray-900 border-2 border-transparent focus:border-primary/20 outline-none"
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3 sm:gap-4">
-            {/* Protein */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
-               <label className="text-[9px] sm:text-[10px] font-bold text-blue-500 uppercase block mb-1">Protein (g)</label>
+               <label className="block text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Protein (g)</label>
                <input 
-                 type="number"
-                 value={targets.protein}
-                 onChange={(e) => handleChange('protein', Number(e.target.value))}
-                 className="w-full p-2 sm:p-3 bg-blue-50 rounded-xl text-center font-bold text-sm sm:text-base text-blue-700 outline-none focus:ring-2 focus:ring-blue-200"
+                  type="number" 
+                  value={targets.protein}
+                  onChange={(e) => handleChange('protein', Number(e.target.value))}
+                  className="w-full p-3 bg-blue-50 rounded-xl font-bold text-blue-900 border-none outline-none text-center"
                />
             </div>
-            {/* Carbs */}
             <div>
-               <label className="text-[9px] sm:text-[10px] font-bold text-yellow-500 uppercase block mb-1">Carbs (g)</label>
+               <label className="block text-[10px] font-bold text-yellow-500 uppercase tracking-widest mb-1">Carbs (g)</label>
                <input 
-                 type="number"
-                 value={targets.carbs}
-                 onChange={(e) => handleChange('carbs', Number(e.target.value))}
-                 className="w-full p-2 sm:p-3 bg-yellow-50 rounded-xl text-center font-bold text-sm sm:text-base text-yellow-700 outline-none focus:ring-2 focus:ring-yellow-200"
+                  type="number" 
+                  value={targets.carbs}
+                  onChange={(e) => handleChange('carbs', Number(e.target.value))}
+                  className="w-full p-3 bg-yellow-50 rounded-xl font-bold text-yellow-900 border-none outline-none text-center"
                />
             </div>
-            {/* Fat */}
             <div>
-               <label className="text-[9px] sm:text-[10px] font-bold text-purple-500 uppercase block mb-1">Fat (g)</label>
+               <label className="block text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-1">Fat (g)</label>
                <input 
-                 type="number"
-                 value={targets.fat}
-                 onChange={(e) => handleChange('fat', Number(e.target.value))}
-                 className="w-full p-2 sm:p-3 bg-purple-50 rounded-xl text-center font-bold text-sm sm:text-base text-purple-700 outline-none focus:ring-2 focus:ring-purple-200"
+                  type="number" 
+                  value={targets.fat}
+                  onChange={(e) => handleChange('fat', Number(e.target.value))}
+                  className="w-full p-3 bg-purple-50 rounded-xl font-bold text-purple-900 border-none outline-none text-center"
                />
             </div>
           </div>
         </div>
 
         <button 
-          onClick={() => { onSave(targets); onClose(); }}
-          className="w-full py-3 sm:py-4 bg-primary text-white rounded-2xl font-bold text-base sm:text-lg shadow-lg shadow-green-100 hover:bg-green-600 hover:shadow-xl active:scale-[0.98] transition-all mt-6 sm:mt-8"
+          onClick={handleSave}
+          className="w-full mt-8 py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-[0.98] transition-all"
         >
           Save Changes
         </button>
@@ -421,157 +441,63 @@ const MacroEditor = ({ current, onSave, onClose }: { current: NutritionTargets, 
 };
 
 const ResultSummary = ({ items, onUpdate, onConfirm, onCancel }: { items: MealItem[], onUpdate: (items: MealItem[]) => void, onConfirm: () => void, onCancel: () => void }) => {
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editGrams, setEditGrams] = useState<string>("");
+  const totalCalories = items.reduce((sum, item) => sum + item.nutrients.calories, 0);
 
-  const totalCalories = items.reduce((acc, item) => acc + item.nutrients.calories, 0);
-
-  const handleDelete = (index: number) => {
+  const handleRemove = (index: number) => {
     const newItems = [...items];
     newItems.splice(index, 1);
-    onUpdate(newItems);
-  };
-
-  const startEdit = (index: number, currentGrams: number) => {
-    setEditingIndex(index);
-    setEditGrams(String(currentGrams));
-  };
-
-  const saveEdit = (index: number) => {
-    const grams = parseFloat(editGrams);
-    if (isNaN(grams) || grams <= 0) {
-        setEditingIndex(null);
-        return;
+    if (newItems.length === 0) {
+      onCancel();
+    } else {
+      onUpdate(newItems);
     }
-
-    const item = items[index];
-    const ratio = grams / item.portionGrams;
-    
-    // Scale all nutrients
-    const newNutrients = {
-        ...item.nutrients,
-        calories: Math.round(item.nutrients.calories * ratio),
-        protein: parseFloat((item.nutrients.protein * ratio).toFixed(1)),
-        carbs: parseFloat((item.nutrients.carbs * ratio).toFixed(1)),
-        fat: parseFloat((item.nutrients.fat * ratio).toFixed(1)),
-        fiber: parseFloat((item.nutrients.fiber * ratio).toFixed(1)),
-    };
-
-    // Reconstruct Label carefully
-    const namePart = item.portionLabel.replace(/^\d+(\.\d+)?g\s*/i, "") || item.portionLabel;
-    
-    const newItem = {
-        ...item,
-        portionGrams: grams,
-        portionLabel: `${grams}g ${namePart}`,
-        nutrients: newNutrients
-    };
-
-    const newItems = [...items];
-    newItems[index] = newItem;
-    onUpdate(newItems);
-    setEditingIndex(null);
   };
-  
+
   return (
-    <div className="fixed inset-0 z-[150] flex items-end justify-center p-0 bg-black/40 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-lg rounded-t-[2.5rem] p-6 sm:p-8 shadow-2xl animate-slide-up flex flex-col gap-4 sm:gap-6 max-h-[90vh]">
-        <div className="flex justify-between items-center">
-          <h3 className="text-xl sm:text-2xl font-extrabold text-gray-900">Meal Detected</h3>
-          <div className="bg-green-100 text-primary px-3 py-1 rounded-lg text-xs sm:text-sm font-bold">AI Identified</div>
+    <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white w-full max-w-lg md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">Meal Summary</h3>
+            <p className="text-sm text-gray-500 font-medium">{items.length} items detected</p>
+          </div>
+          <div className="text-right">
+             <div className="text-2xl font-black text-primary">{Math.round(totalCalories)}</div>
+             <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total kcal</div>
+          </div>
         </div>
 
-        <div className="space-y-3 sm:space-y-4 overflow-y-auto custom-scrollbar flex-1 min-h-[20vh]">
-          {items.length === 0 ? (
-             <div className="text-center py-8 text-gray-400 text-sm">No items. Scan again or add manually.</div>
-          ) : items.map((item, idx) => (
-            <div key={idx} className="flex flex-col p-3 sm:p-4 bg-gray-50 rounded-2xl border border-gray-100 transition-all hover:border-primary/20">
-              <div className="flex justify-between items-center mb-1">
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-lg flex-shrink-0">
-                    {item.portionLabel.toLowerCase().includes('roti') ? '🥯' : 
-                      item.portionLabel.toLowerCase().includes('rice') ? '🍚' : 
-                      item.portionLabel.toLowerCase().includes('banana') ? '🍌' : '🍲'}
-                  </div>
-                  
-                  {editingIndex === idx ? (
-                      <div className="flex items-center gap-2">
-                          <input 
-                             type="number" 
-                             value={editGrams}
-                             onChange={e => setEditGrams(e.target.value)}
-                             className="w-16 p-1 bg-white border border-primary rounded-lg font-bold text-center outline-none text-sm"
-                             autoFocus
-                          />
-                          <span className="text-sm font-bold text-gray-500">g</span>
-                      </div>
-                  ) : (
-                      <div className="min-w-0">
-                        <div className="font-bold text-gray-800 text-sm truncate">{item.portionLabel}</div>
-                        <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{item.manuallyAdded ? 'Manual' : 'High Conf'}</div>
-                      </div>
-                  )}
+        <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar mb-6">
+          {items.map((item, idx) => (
+            <div key={idx} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+              <div>
+                <div className="font-bold text-gray-800">{item.portionLabel}</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {item.nutrients.protein}p • {item.nutrients.carbs}c • {item.nutrients.fat}f
+                  {item.nutrients.sourceDatabase === 'AI' && <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded text-[9px] font-bold uppercase">AI Est.</span>}
                 </div>
-
-                <div className="flex items-center gap-3">
-                    {editingIndex === idx ? (
-                        <button onClick={() => saveEdit(idx)} className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200">
-                            <Icons.Check />
-                        </button>
-                    ) : (
-                        <>
-                            <div className="font-black text-gray-900 text-sm whitespace-nowrap">{item.nutrients.calories} kcal</div>
-                            <div className="flex gap-1">
-                                <button 
-                                    onClick={() => startEdit(idx, item.portionGrams)}
-                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-primary hover:bg-white rounded-lg transition-colors"
-                                >
-                                    <Icons.Pencil />
-                                </button>
-                                <button 
-                                    onClick={() => handleDelete(idx)}
-                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-red-500 hover:bg-white rounded-lg transition-colors"
-                                >
-                                    <Icons.Trash />
-                                </button>
-                            </div>
-                        </>
-                    )}
-                </div>
+                {item.nutrients.micros && item.nutrients.micros.length > 0 && (
+                   <div className="flex flex-wrap gap-1 mt-1.5">
+                      {item.nutrients.micros.slice(0, 2).map((m, i) => (
+                         <span key={i} className="text-[9px] bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-500">{m}</span>
+                      ))}
+                   </div>
+                )}
               </div>
-              
-              {/* Micronutrients display */}
-              {item.nutrients.micros && item.nutrients.micros.length > 0 && (
-                <div className="mt-2 pl-[3.25rem] flex flex-wrap gap-2">
-                  {item.nutrients.micros.map((micro, mIdx) => (
-                    <span key={mIdx} className="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium border border-green-100">
-                      {micro}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <div className="flex items-center gap-3">
+                 <div className="font-black text-gray-900">{item.nutrients.calories}</div>
+                 <button onClick={() => handleRemove(idx)} className="p-2 text-gray-400 hover:text-red-500 bg-white rounded-xl shadow-sm">
+                    <Icons.Trash />
+                 </button>
+              </div>
             </div>
           ))}
         </div>
 
-        <div className="flex justify-between items-center p-4 sm:p-6 bg-primary/5 rounded-[2rem] border border-primary/10 mt-auto">
-          <span className="font-bold text-gray-500 text-sm sm:text-base">Total Calories</span>
-          <span className="text-2xl sm:text-3xl font-black text-primary">{totalCalories} kcal</span>
-        </div>
-
         <div className="flex gap-4">
-          <button 
-            onClick={onCancel}
-            className="flex-1 py-3 sm:py-4 bg-gray-100 text-gray-800 rounded-2xl font-bold hover:bg-gray-200 active:scale-95 transition-all text-sm sm:text-base"
-          >
-            Cancel
-          </button>
-          <button 
-            onClick={onConfirm}
-            disabled={items.length === 0}
-            className="flex-[2] py-3 sm:py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 hover:bg-green-600 active:scale-95 transition-all disabled:opacity-50 disabled:shadow-none text-sm sm:text-base"
-          >
-            Log Meal
+          <button onClick={onCancel} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">Discard</button>
+          <button onClick={onConfirm} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 flex items-center justify-center gap-2">
+            Confirm Meal <Icons.Check />
           </button>
         </div>
       </div>
