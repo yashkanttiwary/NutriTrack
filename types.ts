@@ -14,6 +14,7 @@ export interface Nutrients {
   carbs: number;        // grams
   fat: number;          // grams
   fiber: number;        // grams
+  micros?: string[];    // e.g., ["Iron: 10% DV", "Calcium: 50mg"]
   sourceDatabase: "IFCT" | "USDA" | "Custom" | "AI"; // CRITICAL: Traceability
 }
 
@@ -42,6 +43,7 @@ export interface FoodItem {
 export type Gender = "Male" | "Female" | "Other";
 export type ActivityLevel = "Sedentary" | "Light" | "Moderate" | "Active" | "Very Active";
 export type Goal = "Lose Weight" | "Maintain" | "Gain Muscle";
+export type DietaryPreference = "Vegetarian" | "Non-Vegetarian" | "Eggetarian" | "Vegan" | "Jain";
 
 export interface UserProfile {
   id: string; // 'current_user'
@@ -53,6 +55,8 @@ export interface UserProfile {
   weightKg: number;
   activityLevel: ActivityLevel;
   goal: Goal;
+  dietaryPreference: DietaryPreference;
+  medicalConditions: string;
   createdAt: number;
 }
 

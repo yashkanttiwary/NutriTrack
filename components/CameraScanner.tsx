@@ -76,7 +76,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
           {
             parts: [
               { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-              { text: "Identify the Indian food items on this plate. For each item, estimate the portion size in grams carefully. Return a JSON array of objects with keys: 'name' (string) and 'grams' (number). Example: [{'name': 'Paneer Butter Masala', 'grams': 200}]. Do not include units in the 'grams' field, just the number." }
+              { text: "Identify the Indian food items on this plate. For each item, estimate the portion size in grams carefully. IMPORTANT: Include estimates for micronutrients (Iron, Calcium, Vit C, etc.) if possible. Return a JSON array of objects with keys: 'name' (string), 'grams' (number), 'micros' (array of strings). Example: [{'name': 'Paneer', 'grams': 200, 'micros': ['Calcium: 200mg']}]. Do not include units in the 'grams' field." }
             ]
           }
         ],
@@ -109,7 +109,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
             foodId: food.id,
             portionGrams: grams,
             portionLabel: `${grams}g ${food.name}`,
-            nutrients: nutrients,
+            nutrients: {
+              ...nutrients,
+              micros: item.micros || [] // Append AI micros to local macros
+            },
             confidence: "high",
             manuallyAdded: false
           });

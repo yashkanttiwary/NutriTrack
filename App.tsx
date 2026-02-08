@@ -87,7 +87,21 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
         });
       }
       
-      const promptText = `Analyze this meal. Text description: "${query}". Identify all food items. For each item, estimate the weight in grams and provide nutrition data (Calories, Protein, Carbs, Fat, Fiber). If specific values aren't known, estimate based on standard Indian portions. Return a JSON array with keys: name (string), grams (number), calories (number), protein (number), carbs (number), fat (number), fiber (number).`;
+      const promptText = `
+        Analyze this meal. Text description: "${query}". 
+        Identify all food items. For each item, estimate the weight in grams and provide nutrition data.
+        IMPORTANT: Include estimates for key micronutrients (Iron, Calcium, Vitamin C, etc.) if possible.
+        
+        Return a JSON array with keys: 
+        name (string), 
+        grams (number), 
+        calories (number), 
+        protein (number), 
+        carbs (number), 
+        fat (number), 
+        fiber (number),
+        micros (array of strings, e.g. ["Iron: 10mg", "Calcium: 5%"]).
+      `;
       parts.push({ text: promptText });
 
       const response = await ai.models.generateContent({
@@ -108,6 +122,7 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
           carbs: item.carbs,
           fat: item.fat,
           fiber: item.fiber,
+          micros: item.micros || [],
           sourceDatabase: "AI"
         },
         confidence: "medium",
@@ -130,7 +145,23 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
 
   return (
     <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-md md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl h-[85vh] flex flex-col">
+      <div className="bg-white w-full max-w-md md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl h-[85vh] flex flex-col relative overflow-hidden">
+        
+        {/* Loading Overlay */}
+        {isAnalyzing && (
+          <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in">
+             <div className="w-20 h-20 relative mb-6">
+                <div className="absolute inset-0 border-4 border-gray-100 rounded-full"></div>
+                <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                <div className="absolute inset-4 bg-primary/10 rounded-full flex items-center justify-center animate-pulse">
+                   <Icons.Search />
+                </div>
+             </div>
+             <h3 className="text-xl font-bold text-gray-900 mb-2">Analyzing Meal...</h3>
+             <p className="text-gray-500 text-sm">Identifying foods & calculating nutrients</p>
+          </div>
+        )}
+
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-2xl font-bold text-gray-900">Log Meal</h3>
           <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
@@ -186,11 +217,7 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
                       : 'bg-primary text-white shadow-lg shadow-green-100 hover:scale-105 active:scale-95'
                   }`}
                 >
-                  {isAnalyzing ? (
-                    <>Analyzing...</>
-                  ) : (
-                    <>Analyze <Icons.Send /></>
-                  )}
+                  Analyze <Icons.Send />
                 </button>
               </div>
             </div>
@@ -335,20 +362,32 @@ const ResultSummary = ({ items, onConfirm, onCancel }: { items: MealItem[], onCo
 
         <div className="space-y-4 max-h-[30vh] overflow-y-auto custom-scrollbar">
           {items.map((item, idx) => (
-            <div key={idx} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-lg">
-                   {/* Fallback emoji logic */}
-                   {item.portionLabel.toLowerCase().includes('roti') ? '🥯' : 
-                    item.portionLabel.toLowerCase().includes('rice') ? '🍚' : 
-                    item.portionLabel.toLowerCase().includes('banana') ? '🍌' : '🍲'}
+            <div key={idx} className="flex flex-col p-4 bg-gray-50 rounded-2xl">
+              <div className="flex justify-between items-center mb-1">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-lg">
+                    {item.portionLabel.toLowerCase().includes('roti') ? '🥯' : 
+                      item.portionLabel.toLowerCase().includes('rice') ? '🍚' : 
+                      item.portionLabel.toLowerCase().includes('banana') ? '🍌' : '🍲'}
+                  </div>
+                  <div>
+                    <div className="font-bold text-gray-800 text-sm">{item.portionLabel}</div>
+                    <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{item.manuallyAdded ? 'Manual Entry' : 'Confidence High'}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="font-bold text-gray-800 text-sm">{item.portionLabel}</div>
-                  <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{item.manuallyAdded ? 'Manual Entry' : 'Confidence High'}</div>
-                </div>
+                <div className="font-black text-gray-900">{item.nutrients.calories} kcal</div>
               </div>
-              <div className="font-black text-gray-900">{item.nutrients.calories} kcal</div>
+              
+              {/* Micronutrients display */}
+              {item.nutrients.micros && item.nutrients.micros.length > 0 && (
+                <div className="mt-2 pl-[3.25rem] flex flex-wrap gap-2">
+                  {item.nutrients.micros.map((micro, mIdx) => (
+                    <span key={mIdx} className="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium border border-green-100">
+                      {micro}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -657,7 +696,8 @@ const App: React.FC = () => {
         carbs: acc.carbs + item.nutrients.carbs,
         fat: acc.fat + item.nutrients.fat,
         fiber: acc.fiber + item.nutrients.fiber,
-        sourceDatabase: "IFCT"
+        sourceDatabase: "IFCT",
+        micros: [] // Aggregate logic would go here, simplified for now
       }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sourceDatabase: "IFCT" as any }),
       mealType: mealType
     };
