@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { getTodayLog, updateDailyTargets } from './services/db';
+import { getTodayLog, updateDailyTargets, saveMeal } from './services/db';
 import { APP_CONFIG } from './constants';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { DailyLog } from './types';
+import { DailyLog, MealItem, Meal } from './types';
+import { CameraScanner } from './components/CameraScanner';
 
 // --- Premium Icons (Custom SVGs) ---
 const Icons = {
@@ -66,27 +67,63 @@ const CalorieEditor = ({ current, onSave, onClose }: { current: number, onSave: 
   );
 };
 
-const AlertModal = ({ title, message, onClose }: { title: string, message: string, onClose: () => void }) => (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-    <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 shadow-2xl text-center">
-      <h3 className="text-xl font-bold text-gray-900 mb-2">{title}</h3>
-      <p className="text-gray-500 mb-8 text-sm leading-relaxed">{message}</p>
-      <button 
-        onClick={onClose}
-        className="w-full py-3 bg-gray-100 text-gray-800 rounded-2xl font-bold hover:bg-gray-200 transition-colors"
-      >
-        Dismiss
-      </button>
+const ResultSummary = ({ items, onConfirm, onCancel }: { items: MealItem[], onConfirm: () => void, onCancel: () => void }) => {
+  const totalCalories = items.reduce((acc, item) => acc + item.nutrients.calories, 0);
+  
+  return (
+    <div className="fixed inset-0 z-[150] flex items-end justify-center p-0 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-md rounded-t-[3rem] p-8 shadow-2xl animate-slide-up flex flex-col gap-6">
+        <div className="flex justify-between items-center">
+          <h3 className="text-2xl font-extrabold text-gray-900">Meal Detected</h3>
+          <div className="bg-green-100 text-primary px-3 py-1 rounded-lg text-sm font-bold">AI Identified</div>
+        </div>
+
+        <div className="space-y-4 max-h-[30vh] overflow-y-auto custom-scrollbar">
+          {items.map((item, idx) => (
+            <div key={idx} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center">🍱</div>
+                <div>
+                  <div className="font-bold text-gray-800 text-sm">{item.portionLabel}</div>
+                  <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Confidence High</div>
+                </div>
+              </div>
+              <div className="font-black text-gray-900">{item.nutrients.calories} kcal</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-between items-center p-6 bg-primary/5 rounded-[2rem] border border-primary/10">
+          <span className="font-bold text-gray-500">Total Calories</span>
+          <span className="text-3xl font-black text-primary">{totalCalories} kcal</span>
+        </div>
+
+        <div className="flex gap-4">
+          <button 
+            onClick={onCancel}
+            className="flex-1 py-4 bg-gray-100 text-gray-800 rounded-2xl font-bold hover:bg-gray-200 active:scale-95 transition-all"
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={onConfirm}
+            className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 hover:bg-green-600 active:scale-95 transition-all"
+          >
+            Log Meal
+          </button>
+        </div>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // --- Main App ---
 
 const App: React.FC = () => {
   const [log, setLog] = useState<DailyLog | null>(null);
   const [editingCalories, setEditingCalories] = useState(false);
-  const [alert, setAlert] = useState<{title: string, message: string} | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [detectedItems, setDetectedItems] = useState<MealItem[] | null>(null);
 
   useEffect(() => {
     getTodayLog().then(setLog);
@@ -97,6 +134,34 @@ const App: React.FC = () => {
     const newTargets = { ...log.targets, calories: newVal };
     await updateDailyTargets(newTargets);
     setLog({ ...log, targets: newTargets });
+  };
+
+  const handleScanResult = (items: MealItem[]) => {
+    setIsScanning(false);
+    setDetectedItems(items);
+  };
+
+  const confirmMeal = async () => {
+    if (!detectedItems || !log) return;
+    
+    const meal: Meal = {
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: new Date(),
+      items: detectedItems,
+      totalNutrients: detectedItems.reduce((acc, item) => ({
+        calories: acc.calories + item.nutrients.calories,
+        protein: acc.protein + item.nutrients.protein,
+        carbs: acc.carbs + item.nutrients.carbs,
+        fat: acc.fat + item.nutrients.fat,
+        fiber: acc.fiber + item.nutrients.fiber,
+        sourceDatabase: "IFCT"
+      }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sourceDatabase: "IFCT" as any }),
+      mealType: "Lunch" // Simplified for now
+    };
+
+    await saveMeal(meal);
+    setDetectedItems(null);
+    getTodayLog().then(setLog);
   };
 
   if (!log) return (
@@ -119,11 +184,18 @@ const App: React.FC = () => {
           />
         )}
 
-        {alert && (
-          <AlertModal 
-            title={alert.title} 
-            message={alert.message} 
-            onClose={() => setAlert(null)} 
+        {isScanning && (
+          <CameraScanner 
+            onClose={() => setIsScanning(false)} 
+            onResult={handleScanResult} 
+          />
+        )}
+
+        {detectedItems && (
+          <ResultSummary 
+            items={detectedItems} 
+            onConfirm={confirmMeal} 
+            onCancel={() => setDetectedItems(null)} 
           />
         )}
 
@@ -211,7 +283,7 @@ const App: React.FC = () => {
                   {/* Action Buttons */}
                   <div className="grid grid-cols-2 gap-4">
                     <button 
-                      onClick={() => setAlert({ title: "Camera Starting", message: "Preparing the Indian Food Lens... Please ensure you are in a well-lit area." })}
+                      onClick={() => setIsScanning(true)}
                       className="flex flex-col items-center justify-center gap-4 bg-primary text-white p-8 rounded-[2.5rem] font-bold shadow-lg shadow-green-100 hover:shadow-xl hover:bg-green-600 active:scale-95 transition-all group"
                     >
                       <div className="p-4 bg-white/20 rounded-2xl group-hover:scale-110 transition-transform">
@@ -221,8 +293,8 @@ const App: React.FC = () => {
                     </button>
 
                     <button 
-                      onClick={() => setAlert({ title: "Manual Entry", message: "Loading the nutrition database... Search feature initializing." })}
-                      className="flex flex-col items-center justify-center gap-4 bg-white text-gray-800 p-8 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-lg hover:border-primary/20 active:scale-95 transition-all group"
+                      onClick={() => {}}
+                      className="flex flex-col items-center justify-center gap-4 bg-white text-gray-800 p-8 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-lg hover:border-primary/20 active:scale-95 transition-all group opacity-50 cursor-not-allowed"
                     >
                       <div className="p-4 bg-gray-50 text-primary rounded-2xl group-hover:scale-110 transition-transform">
                         <Icons.Plus />
@@ -248,7 +320,7 @@ const App: React.FC = () => {
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        {log.meals.map(meal => (
+                        {log.meals.slice().reverse().map(meal => (
                           <div key={meal.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl hover:bg-green-50 transition-colors cursor-pointer group">
                             <div className="flex items-center gap-4">
                               <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-lg">

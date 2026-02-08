@@ -11,7 +11,8 @@ class NutritionDatabase extends Dexie {
     super('NutriTrackDB');
     
     // Define schema: this.version and this.stores are inherited from Dexie
-    this.version(1).stores({
+    // Fix: Explicitly cast to any to resolve "Property 'version' does not exist" compilation error
+    (this as any).version(1).stores({
       meals: 'id, timestamp, mealType', // Primary key and indexed props
       dailyLogs: 'date'
     });
@@ -24,7 +25,8 @@ export const db = new NutritionDatabase();
 // Helper to save a meal with transaction support for atomicity
 export async function saveMeal(meal: Meal) {
   // Use the transaction method from the Dexie instance
-  return await db.transaction('rw', [db.meals, db.dailyLogs], async () => {
+  // Fix: Explicitly cast to any to resolve "Property 'transaction' does not exist" compilation error
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     await db.meals.add(meal);
     await updateDailyLog(meal.timestamp);
   });
@@ -33,7 +35,8 @@ export async function saveMeal(meal: Meal) {
 // Helper to delete a meal and update the daily log
 export async function deleteMeal(id: string) {
   // Use the transaction method from the Dexie instance
-  return await db.transaction('rw', [db.meals, db.dailyLogs], async () => {
+  // Fix: Explicitly cast to any to resolve "Property 'transaction' does not exist" compilation error
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     const meal = await db.meals.get(id);
     if (!meal) return;
     
@@ -69,7 +72,8 @@ export async function updateDailyTargets(targets: DailyLog['targets']) {
   const dateStr = new Date().toISOString().split('T')[0];
   
   // Use the transaction method from the Dexie instance
-  await db.transaction('rw', [db.dailyLogs], async () => {
+  // Fix: Explicitly cast to any to resolve "Property 'transaction' does not exist" compilation error
+  await (db as any).transaction('rw', [db.dailyLogs], async () => {
     const log = await db.dailyLogs.get(dateStr);
     if (log) {
       await db.dailyLogs.update(dateStr, { targets });
