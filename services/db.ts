@@ -89,7 +89,8 @@ export async function getTodayLog(): Promise<DailyLog> {
     protein: 80,
     carbs: 250,
     fat: 60,
-    fiber: 30
+    fiber: 30,
+    micros: []
   };
 
   // Return default if not exists (don't save yet to avoid empty DB writes until action)
@@ -146,7 +147,8 @@ async function updateDailyLog(date: Date) {
     protein: 80,
     carbs: 250,
     fat: 60,
-    fiber: 30
+    fiber: 30,
+    micros: []
   };
 
   if (meals.length === 0) {

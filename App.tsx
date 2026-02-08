@@ -614,7 +614,7 @@ const ProfileView = ({ profile }: { profile: UserProfile }) => (
         {profile.targets && (
             <div className="bg-white p-6 rounded-[2rem] border border-gray-50">
                 <h3 className="font-bold text-gray-800 mb-4">Your Daily Plan</h3>
-                <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="grid grid-cols-3 gap-4 text-center mb-6">
                     <div>
                         <div className="text-xs text-gray-400 uppercase">Protein</div>
                         <div className="font-bold text-gray-900">{profile.targets.protein}g</div>
@@ -628,14 +628,22 @@ const ProfileView = ({ profile }: { profile: UserProfile }) => (
                         <div className="font-bold text-gray-900">{profile.targets.fat}g</div>
                     </div>
                 </div>
+
+                {/* Added Micros Section in Profile */}
+                <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-4">
+                    <div className="text-center">
+                        <div className="text-xs text-green-500 uppercase font-bold">Fiber</div>
+                        <div className="font-bold text-gray-800">{profile.targets.fiber}g</div>
+                    </div>
+                    {profile.targets.micros && profile.targets.micros.map((m, idx) => (
+                         <div key={idx} className="text-center">
+                            <div className="text-xs text-gray-400 uppercase truncate" title={m.name}>{m.name}</div>
+                            <div className="font-bold text-gray-800 truncate">{m.amount}</div>
+                        </div>
+                    ))}
+                </div>
             </div>
         )}
-
-        <div className="bg-primary/10 p-8 rounded-[2.5rem] border border-primary/20">
-             <h3 className="text-lg font-bold text-primary mb-2">Premium Features</h3>
-             <p className="text-sm text-primary/80 mb-4">Upgrade to unlock advanced macronutrient analytics and unlimited meal history.</p>
-             <button className="bg-primary text-white px-6 py-3 rounded-xl font-bold text-sm shadow-md">Upgrade to Pro</button>
-        </div>
     </div>
 );
 

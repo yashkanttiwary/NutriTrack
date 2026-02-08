@@ -67,7 +67,12 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         protein,
         carbs,
         fat,
-        fiber: 30
+        fiber: 30,
+        micros: [
+          { name: "Iron", amount: "18mg" },
+          { name: "Calcium", amount: "1000mg" },
+          { name: "Vitamin D", amount: "600IU" }
+        ]
       },
       explanation: "Calculated based on standard BMR (Mifflin-St Jeor) and activity multipliers. Adjusted for your specific goal."
     };
@@ -96,8 +101,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
 
         Task: Calculate the optimal daily nutrition targets for this user. 
         Provide strict numbers for: calories, protein (g), carbs (g), fat (g), fiber (g).
-        Also provide a short, motivating explanation (max 3 sentences) specifically explaining WHY these targets fit their goal and body type.
-
+        Also provide 3-4 key micronutrient goals (e.g. Iron, Calcium, Vit D, B12, or others relevant to Indian diet/profile) suitable for their profile.
+        
         Return strictly valid JSON:
         {
           "calories": number,
@@ -105,6 +110,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
           "carbs": number,
           "fat": number,
           "fiber": number,
+          "micros": [ { "name": "string", "amount": "string with unit" } ],
           "explanation": string
         }
       `;
@@ -125,7 +131,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                 protein: result.protein,
                 carbs: result.carbs,
                 fat: result.fat,
-                fiber: result.fiber
+                fiber: result.fiber || 30,
+                micros: result.micros || []
             },
             explanation: result.explanation
         });
@@ -366,7 +373,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
           )}
 
           {step === 5 && planData && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-in fade-in duration-500">
               <h2 className="text-2xl font-bold text-gray-900 text-center">Your Personal Plan</h2>
               
               <div className="bg-primary/5 p-6 rounded-[2rem] border border-primary/10 text-center relative overflow-hidden">
@@ -378,6 +385,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                  <div className="text-sm font-bold text-primary/60 uppercase tracking-widest mt-1">kcal / day</div>
               </div>
 
+              {/* Macros Grid */}
               <div className="grid grid-cols-3 gap-3">
                  <div className="bg-blue-50 p-4 rounded-2xl text-center">
                     <div className="text-xs font-bold text-blue-400 uppercase">Protein</div>
@@ -393,12 +401,26 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                  </div>
               </div>
 
+              {/* Micros & Fiber Grid - NEW SECTION */}
+              <div className="grid grid-cols-2 gap-3">
+                 <div className="bg-green-50 p-4 rounded-2xl text-center">
+                    <div className="text-xs font-bold text-green-600 uppercase">Fiber</div>
+                    <div className="text-xl font-black text-green-700">{planData.targets.fiber}g</div>
+                 </div>
+                 {planData.targets.micros && planData.targets.micros.map((micro, idx) => (
+                    <div key={idx} className="bg-gray-50 p-4 rounded-2xl text-center">
+                      <div className="text-xs font-bold text-gray-500 uppercase truncate px-1" title={micro.name}>{micro.name}</div>
+                      <div className="text-xl font-black text-gray-700 truncate">{micro.amount}</div>
+                    </div>
+                 ))}
+              </div>
+
               <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
                 <div className="flex items-center gap-2 mb-2">
                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">AI Reasoning</span>
                 </div>
-                <p className="text-sm text-gray-600 leading-relaxed font-medium">
+                <p className="text-sm text-gray-600 leading-relaxed font-medium text-justify">
                   {planData.explanation}
                 </p>
               </div>

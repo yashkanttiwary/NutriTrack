@@ -51,6 +51,7 @@ export interface NutritionTargets {
   carbs: number;
   fat: number;
   fiber: number;
+  micros: { name: string; amount: string }[];
 }
 
 export interface UserProfile {
