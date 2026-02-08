@@ -22,16 +22,14 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
   };
 
   useEffect(() => {
-    // Load history on mount
     async function loadHistory() {
       const history = await getChatHistory();
       if (history.length > 0) {
         setMessages(history);
       } else {
-        // Initial Greeting if no history
         const initialMsg: ChatMessage = {
           role: 'model',
-          text: `Hi ${userProfile.name}! I've prepared your nutrition plan based on your goal to ${userProfile.goal.toLowerCase()}. You can ask me anything about your diet or health!`,
+          text: `Hi ${userProfile.name}! I'm your nutrition coach. I see your goal is to ${userProfile.goal.toLowerCase()}. Ask me anything!`,
           timestamp: Date.now()
         };
         saveChatMessage('model', initialMsg.text);
@@ -51,7 +49,6 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
     const userMsgText = input.trim();
     setInput('');
     
-    // Optimistic UI update
     const userMsg: ChatMessage = { role: 'user', text: userMsgText, timestamp: Date.now() };
     setMessages(prev => [...prev, userMsg]);
     setLoading(true);
@@ -59,10 +56,8 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
     try {
       await saveChatMessage('user', userMsgText);
 
-      // 1. Create and Validate Client
       const ai = createGenAIClient(apiKey);
       
-      // Construct context with Plan Explanation and History
       const historyContext = messages.slice(-5).map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${m.text}`).join('\n');
       
       const context = `
@@ -75,57 +70,39 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
         - Medical: ${userProfile.medicalConditions || "None"}
         - Specific Notes/Goals: ${userProfile.additionalDetails || "None"}
         
-        Current Plan Targets:
-        - Calories: ${dailyLog.targets.calories}
-        - Protein: ${dailyLog.targets.protein}g
-        - Carbs: ${dailyLog.targets.carbs}g
-        - Fat: ${dailyLog.targets.fat}g
+        Plan Targets:
+        - ${dailyLog.targets.calories} kcal
+        - ${dailyLog.targets.protein}g Protein
         
-        Initial Plan Logic: ${userProfile.planExplanation || "N/A"}
-
-        Today's Log So Far:
-        - Calories: ${dailyLog.totalNutrients.calories} / ${dailyLog.targets.calories}
-        - Protein: ${dailyLog.totalNutrients.protein}g
-        - Carbs: ${dailyLog.totalNutrients.carbs}g
-        - Fat: ${dailyLog.totalNutrients.fat}g
+        Today's Progress:
+        - ${dailyLog.totalNutrients.calories} kcal consumed
         
-        Recent Chat History:
+        Recent History:
         ${historyContext}
         
-        Current User Question: ${userMsgText}
+        User Question: ${userMsgText}
         
-        Task: Answer as the nutrition coach. Be encouraging. Keep answers under 3-4 sentences unless detailed explanation is requested.
+        Task: Answer as the coach. Be encouraging and brief (2-3 sentences max unless asked for detail).
       `;
 
-      // Use Flash model instead of Pro to ensure availability and consistency with Onboarding
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: [{ role: 'user', parts: [{ text: context }] }],
       });
 
-      const replyText = response.text || "I'm having trouble thinking right now. Try again?";
+      const replyText = response.text || "I'm thinking...";
       
       await saveChatMessage('model', replyText);
       setMessages(prev => [...prev, { role: 'model', text: replyText, timestamp: Date.now() }]);
 
     } catch (error: any) {
       console.error("AI Error:", error);
-      let errorMsg = "Connection error. Please check your internet.";
+      let errorMsg = "I'm having trouble connecting.";
       
-      // Robust error message parsing
       const msg = error.message || error.toString();
-      
-      if (msg.includes("API Key")) {
-         errorMsg = "Please configure your API Key in settings.";
-      } else if (msg.includes("403")) {
-         errorMsg = "API Key authentication failed.";
-      } else if (msg.includes("404")) {
-         errorMsg = "The AI model is currently unavailable. Please try again later.";
-      } else if (msg.includes("503")) {
-         errorMsg = "AI service is overloaded. Please try again in a moment.";
-      } else if (msg.length > 0 && msg.length < 100) {
-         errorMsg = `Error: ${msg}`; // Show specific error if it's short/readable
-      }
+      if (msg.includes("API Key")) errorMsg = "Please check your API Key settings.";
+      else if (msg.includes("403")) errorMsg = "Auth failed. Check API Key.";
+      else if (msg.includes("429")) errorMsg = "I'm getting too many requests. Give me a minute.";
       
       setMessages(prev => [...prev, { role: 'model', text: errorMsg, timestamp: Date.now() }]);
     } finally {
@@ -135,7 +112,6 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
 
   return (
     <>
-      {/* Floating Button */}
       <button 
         onClick={() => setIsOpen(true)}
         className="fixed bottom-24 right-6 w-14 h-14 bg-gradient-to-br from-primary to-green-600 rounded-full shadow-xl flex items-center justify-center text-white z-[90] hover:scale-110 transition-transform"
@@ -143,12 +119,9 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
       </button>
 
-      {/* Chat Modal */}
       {isOpen && (
         <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-end md:items-center justify-center p-4">
           <div className="bg-white w-full max-w-md h-[80vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-10">
-            
-            {/* Header */}
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-primary font-bold">AI</div>
@@ -165,7 +138,6 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
               </button>
             </div>
 
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#FAFAFA]">
               {messages.map((msg, idx) => (
                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -190,7 +162,6 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
             <div className="p-4 bg-white border-t border-gray-50">
                <div className="flex gap-2">
                  <input 

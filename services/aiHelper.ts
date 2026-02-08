@@ -12,7 +12,6 @@ export const createGenAIClient = (apiKey: string): GoogleGenAI => {
     throw new Error("API Key is missing. Please configure it in your Profile settings.");
   }
   
-  // Basic format check (optional, but helpful for immediate feedback)
   if (cleanKey.length < 10) {
     throw new Error("API Key appears to be invalid. Please check your Profile settings.");
   }
@@ -21,48 +20,51 @@ export const createGenAIClient = (apiKey: string): GoogleGenAI => {
 };
 
 /**
- * Utility to clean and parse JSON responses from AI models.
- * Models often wrap JSON in Markdown code blocks (```json ... ```), 
- * which causes JSON.parse to fail.
+ * Utility to robustly parse JSON from AI models.
+ * Handles:
+ * 1. Markdown code blocks (```json ... ```)
+ * 2. Conversational text wrapping the JSON
+ * 3. Dirty whitespace/newlines
  */
-export const cleanJsonText = (text: string): string => {
-  if (!text) return "[]";
-  
-  // Remove markdown code blocks like ```json ... ``` or just ``` ... ```
-  let cleaned = text.replace(/```json/g, "").replace(/```/g, "");
-  
-  // Trim whitespace
-  return cleaned.trim();
-};
-
 export const parseAIJson = <T>(text: string): T => {
-  const cleaned = cleanJsonText(text);
-  
+  if (!text) throw new Error("AI returned empty response.");
+
+  // 1. Clean Markdown Code Blocks
+  let cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+
+  // 2. Attempt Direct Parse
   try {
     return JSON.parse(cleaned) as T;
   } catch (e) {
-    console.error("JSON Parse Error:", e, "Original text:", text);
+    // 3. Intelligent Extraction (Find first '[' or '{' and last ']' or '}')
     
-    // Fallback: Attempt to find array or object start/end if extra text exists
-    // This handles cases where the AI adds conversational text before/after the JSON
-    const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (arrayMatch) {
+    // Try finding an Array
+    const firstBracket = cleaned.indexOf('[');
+    const lastBracket = cleaned.lastIndexOf(']');
+    
+    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
       try {
-        return JSON.parse(arrayMatch[0]) as T;
+        const potentialJson = cleaned.substring(firstBracket, lastBracket + 1);
+        return JSON.parse(potentialJson) as T;
       } catch (e2) {
-        // Continue to throw original error if fallback fails
+        // Continue to object check
       }
     }
+
+    // Try finding an Object
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
     
-    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       try {
-        return JSON.parse(objectMatch[0]) as T;
-      } catch (e2) {
-         // Continue to throw original error if fallback fails
+        const potentialJson = cleaned.substring(firstBrace, lastBrace + 1);
+        return JSON.parse(potentialJson) as T;
+      } catch (e3) {
+        // Continue to failure
       }
     }
-    
-    throw new Error("Failed to parse AI response. The model may have returned invalid JSON.");
+
+    console.error("JSON Parse Failed. Input:", text);
+    throw new Error("Could not extract valid JSON from AI response.");
   }
 };

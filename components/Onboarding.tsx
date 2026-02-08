@@ -57,7 +57,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     
     // Goal Adjustment
     if (data.goal === 'Lose Weight') tdee -= 500;
-    else if (data.goal === 'Gain Muscle') tdee += 300; // Conservative surplus
+    else if (data.goal === 'Gain Muscle') tdee += 300; 
 
     const calories = Math.round(tdee);
     const protein = Math.round((calories * 0.3) / 4);
@@ -103,10 +103,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         - Medical Conditions: ${data.medicalConditions || "None"}
         - Specific Notes/Goals: ${data.additionalDetails || "None"}
 
-        Task: Calculate the optimal daily nutrition targets for this user. 
-        Take into account their medical conditions and specific notes (e.g., if they want to lose fat specifically, or have specific dietary restrictions mentioned).
-        Provide strict numbers for: calories, protein (g), carbs (g), fat (g), fiber (g).
-        Also provide 3-4 key micronutrient goals (e.g. Iron, Calcium, Vit D, B12, or others relevant to Indian diet/profile) suitable for their profile.
+        Task: Create a personalized nutrition plan.
+        CRITICAL: If the user mentioned specific medical conditions or notes (e.g., "reduce fat", "PCOS", "Diabetic"), you MUST adjust the macros and micros accordingly.
         
         Return strictly valid JSON:
         {
@@ -116,7 +114,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
           "fat": number,
           "fiber": number,
           "micros": [ { "name": "string", "amount": "string with unit" } ],
-          "explanation": string
+          "explanation": "Brief explanation of why you chose these numbers based on their profile and specific notes."
         }
       `;
 
@@ -126,10 +124,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         config: { responseMimeType: "application/json" }
       });
 
-      // Fixed: Use parseAIJson utility for robust parsing
       const result = parseAIJson<any>(response.text || "{}");
       
-      // Basic validation
       if (result.calories && result.protein) {
         setPlanData({
             targets: {
@@ -418,7 +414,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                  </div>
               </div>
 
-              {/* Micros & Fiber Grid - NEW SECTION */}
+              {/* Micros & Fiber Grid */}
               <div className="grid grid-cols-2 gap-3">
                  <div className="bg-green-50 p-4 rounded-2xl text-center">
                     <div className="text-xs font-bold text-green-600 uppercase">Fiber</div>
