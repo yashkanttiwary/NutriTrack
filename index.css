@@ -7,8 +7,39 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }
+
 /* Hide scrollbar for PWA feel */
 ::-webkit-scrollbar {
   width: 0px;
   background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 0px;
+}
+
+@layer utilities {
+  .animate-in {
+    animation-name: enter;
+    animation-duration: 300ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    --tw-enter-opacity: 0;
+    --tw-enter-scale: 0.95;
+    --tw-enter-translate-y: 10px;
+  }
+  
+  .fade-in {
+    --tw-enter-opacity: 0;
+  }
+  
+  @keyframes enter {
+    from {
+      opacity: var(--tw-enter-opacity, 1);
+      transform: scale(var(--tw-enter-scale, 1)) translateY(var(--tw-enter-translate-y, 0));
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
 }
