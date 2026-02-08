@@ -73,15 +73,14 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
     }
   };
 
-  // Helper to resize image to avoid payload too large errors while retaining details
+  // Improved Image Resizing: Faster, Smaller payload (768px, 60% quality)
   const resizeImage = (dataUrl: string): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
-          // Increase max width to 1024 to retain more detail while keeping payload safe
-          const MAX_DIMENSION = 1024;
+          const MAX_DIMENSION = 768; // Optimized for Speed
           let width = img.width;
           let height = img.height;
           
@@ -97,10 +96,8 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
           const ctx = canvas.getContext('2d');
           if (ctx) {
               ctx.drawImage(img, 0, 0, width, height);
-              // Compress to JPEG 80% quality (better detail retention)
-              resolve(canvas.toDataURL('image/jpeg', 0.8)); 
+              resolve(canvas.toDataURL('image/jpeg', 0.6)); // 60% Quality
           } else {
-              // Fallback if canvas fails
               resolve(dataUrl); 
           }
         } catch (e) {
@@ -118,12 +115,10 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
 
     setIsAnalyzing(true);
     try {
-      // 1. Create and Validate Client
       const ai = createGenAIClient(apiKey);
       
       const parts: any[] = [];
       if (selectedImage) {
-        // Resize image to safe dimensions/format
         const resizedImage = await resizeImage(selectedImage);
         const data = resizedImage.split(',')[1];
         
@@ -138,7 +133,6 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
       const promptText = `
         Analyze this meal. Text description: "${query}". 
         Identify all food items. For each item, estimate the weight in grams and provide nutrition data.
-        IMPORTANT: Include estimates for key micronutrients (Iron, Calcium, Vitamin C, etc.) if possible.
         
         Return a JSON array with keys: 
         name (string), 
@@ -148,18 +142,16 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
         carbs (number), 
         fat (number), 
         fiber (number),
-        micros (array of strings, e.g. ["Iron: 10mg", "Calcium: 5%"]).
+        micros (array of strings).
       `;
       parts.push({ text: promptText });
 
-      // Use Flash model for speed/reliability on mobile
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: [{ parts }],
         config: { responseMimeType: "application/json" }
       });
 
-      // Fix: Use parseAIJson to handle markdown and errors robustly
       const rawJson = parseAIJson<any[]>(response.text || "[]");
       
       const items: MealItem[] = rawJson.map((item: any) => ({
@@ -197,8 +189,7 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
       } else if (msg.includes("413") || msg.includes("payload")) {
          alert("Image is too large. The system attempted to resize it but it's still too big. Try a smaller image.");
       } else {
-         // Show specific error message for better debugging
-         alert(`Failed to analyze meal. Error: ${msg}. Please check your internet connection.`);
+         alert(`Failed to analyze meal. Error: ${msg}.`);
       }
     } finally {
       setIsAnalyzing(false);

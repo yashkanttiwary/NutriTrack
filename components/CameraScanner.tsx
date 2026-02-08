@@ -15,7 +15,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCaptured, setIsCaptured] = useState(false);
-  const [shutterFlash, setShutterFlash] = useState(false); // Visual flash effect
+  const [shutterFlash, setShutterFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
 
@@ -64,26 +64,22 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
     if (!videoRef.current || !canvasRef.current || isProcessing) return;
     if (videoRef.current.readyState < 2) return;
 
-    // --- PHASE 1: IMMEDIATE FEEDBACK ---
-    // 1. Freeze Video Frame Instantly
+    // --- IMMEDIATE UI FEEDBACK ---
     videoRef.current.pause();
-    
-    // 2. Trigger UI States
     setShutterFlash(true);
     setIsCaptured(true);
     setIsProcessing(true);
     setError(null);
-
-    // 3. Remove flash after 150ms
     setTimeout(() => setShutterFlash(false), 150);
 
     try {
-      // --- PHASE 2: PREPARATION ---
       const ai = createGenAIClient(apiKey);
       const video = videoRef.current;
       const canvas = canvasRef.current;
       
-      const MAX_SIZE = 1024;
+      // OPTIMIZATION: Aggressive resizing for speed and payload safety
+      // 768px is sufficient for food recognition and keeps payload tiny (~150KB)
+      const MAX_SIZE = 768; 
       let w = video.videoWidth;
       let h = video.videoHeight;
       
@@ -99,35 +95,38 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error("Canvas init failed");
 
-      // Draw the frozen frame
       ctx.drawImage(video, 0, 0, w, h);
       
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      // OPTIMIZATION: 60% Quality JPEG is much faster to upload/process
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
       const base64Image = dataUrl.split(',')[1];
 
-      // --- PHASE 3: ROBUST AI ANALYSIS ---
-      // Strategy: Ask for generic description if specific identification fails
+      // Robust Prompt
       const prompt = `
-        Analyze this food image.
-        1. Identify the items. If you are unsure of the specific dish name, describe the ingredients (e.g. "Rice with yellow curry" instead of "Unknown").
-        2. Estimate the weight (grams) realistically.
+        Look at this food.
+        1. Identify the items. Guess if unsure (e.g., "Mixed Vegetable Curry").
+        2. Estimate portion size in grams.
         3. Estimate nutrition (Calories, Protein, Carbs, Fat, Fiber).
         
-        Return a strict JSON array of objects with these keys:
-        - name: string (e.g. "Butter Chicken" or "Chicken Curry")
-        - grams: number
-        - calories: number
-        - protein: number
-        - carbs: number
-        - fat: number
-        - fiber: number
-        - micros: array of strings (e.g. ["Iron: 2mg"])
-
-        Do not return markdown. Do not refuse to analyze; provide your best educated guess based on visual ingredients.
+        Return STRICT JSON array:
+        [
+          {
+            "name": "string",
+            "grams": number,
+            "calories": number,
+            "protein": number,
+            "carbs": number,
+            "fat": number,
+            "fiber": number,
+            "micros": ["string"]
+          }
+        ]
       `;
 
+      // MODEL CHANGE: gemini-3-flash-preview
+      // Faster, handles images well, less rigid on "safety" for food items.
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview', // Best model for Vision
+        model: 'gemini-3-flash-preview',
         contents: [
           {
             parts: [
@@ -139,7 +138,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         config: { responseMimeType: "application/json" }
       });
 
-      // --- PHASE 4: PROCESSING & FALLBACKS ---
       const rawJson = parseAIJson<any[]>(response.text || "[]");
       const detectedItems: MealItem[] = [];
 
@@ -151,7 +149,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
 
         const grams = cleanNum(item.grams) || 100;
         
-        // Try Local DB Search first
+        // Search Local DB
         const matches = nutritionCalculator.searchFoods(item.name);
         
         if (matches.length > 0) {
@@ -168,7 +166,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
             manuallyAdded: false
           });
         } else {
-          // Robust Fallback: Use AI numbers
+          // Use AI Data
           detectedItems.push({
             id: Math.random().toString(36).substr(2, 9),
             foodId: 'ai_' + Math.random().toString(36).substr(2, 6),
@@ -190,7 +188,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       }
 
       if (detectedItems.length === 0) {
-        throw new Error("No food detected. Please move closer or check lighting.");
+        throw new Error("No food detected. Please try again.");
       }
 
       stopCamera();
@@ -203,8 +201,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       
       if (eStr.includes("API Key")) msg = "Check API Key in Profile.";
       else if (eStr.includes("403")) msg = "Auth failed. Check API Key.";
-      else if (eStr.includes("404")) msg = "AI Model unavailable. Try again later.";
+      else if (eStr.includes("404")) msg = "AI Model unavailable.";
       else if (eStr.includes("503")) msg = "Server busy. Try again.";
+      else if (eStr.includes("Safety")) msg = "Image blocked by safety filters.";
       
       setError(msg);
     } finally {
@@ -214,7 +213,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
 
   return (
     <div className="fixed inset-0 z-[200] bg-black flex flex-col items-center justify-center animate-in fade-in duration-300">
-      {/* Video Feed */}
       <video
         ref={videoRef}
         autoPlay
@@ -223,12 +221,11 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       />
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Shutter Flash Effect */}
+      {/* Shutter Flash */}
       <div className={`absolute inset-0 bg-white pointer-events-none transition-opacity duration-150 ${shutterFlash ? 'opacity-80' : 'opacity-0'}`} />
 
-      {/* UI Overlay */}
+      {/* Overlay */}
       <div className="absolute inset-0 flex flex-col justify-between p-6 sm:p-8">
-        {/* Header */}
         <div className="flex justify-between items-center z-50">
           <button 
             onClick={onClose}
@@ -242,19 +239,18 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
                ? "bg-primary text-white border-primary animate-pulse" 
                : "bg-black/40 text-white border-white/10 backdrop-blur-md"
           }`}>
-            {isProcessing ? "Analyzing..." : "Ready to Scan"}
+            {isProcessing ? "Processing..." : "Ready"}
           </div>
           
           <div className="w-10" />
         </div>
 
-        {/* Center Feedback */}
         <div className="relative flex-1 flex items-center justify-center">
            {isCaptured && !error && (
              <div className="absolute inset-0 flex items-center justify-center z-40">
                 <div className="bg-black/60 backdrop-blur-md p-6 rounded-3xl flex flex-col items-center gap-4 animate-in zoom-in duration-300">
                    <div className="w-14 h-14 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                   <p className="text-white font-bold tracking-wide text-sm">Identifying Food...</p>
+                   <p className="text-white font-bold tracking-wide text-sm">Analyzing...</p>
                 </div>
              </div>
            )}
@@ -282,12 +278,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
            )}
         </div>
 
-        {/* Shutter Button */}
         {!isCaptured && !error && (
           <div className="flex flex-col items-center gap-6 animate-in slide-in-from-bottom-10 z-50">
-            <p className="text-white/80 text-xs font-medium text-center bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
-              Point camera at your meal
-            </p>
             <button
               onClick={captureAndDetect}
               className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center transition-all hover:scale-105 active:scale-95 bg-white/20 backdrop-blur-sm"
