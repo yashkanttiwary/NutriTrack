@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getTodayLog, updateDailyTargets, saveMeal, getUserProfile, saveUserProfile } from './services/db';
 import { APP_CONFIG } from './constants';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { DailyLog, MealItem, Meal, FoodItem, UserProfile } from './types';
+import { DailyLog, MealItem, Meal, FoodItem, UserProfile, NutritionTargets } from './types';
 import { CameraScanner } from './components/CameraScanner';
 import { Onboarding } from './components/Onboarding';
 import { AIGuidance } from './components/AIGuidance';
@@ -23,7 +23,9 @@ const Icons = {
   X: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
   Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
   Image: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
-  Send: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+  Send: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>,
+  Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>,
+  Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
 };
 
 // --- Modals ---
@@ -81,10 +83,14 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
       
       const parts: any[] = [];
       if (selectedImage) {
+        // Robustly extract mime type and data from Data URL
+        const [meta, data] = selectedImage.split(',');
+        const mimeType = meta.split(':')[1].split(';')[0];
+        
         parts.push({
           inlineData: {
-            mimeType: 'image/jpeg', // Assuming jpeg for simplicity, or detect from data URI
-            data: selectedImage.split(',')[1]
+            mimeType: mimeType, 
+            data: data
           }
         });
       }
@@ -136,12 +142,18 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
       if (items.length > 0) {
         onAdd(items);
       } else {
-        alert("AI could not identify any food. Please try again.");
+        alert("AI could not identify any food. Please try again or add more description.");
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Error:", error);
-      alert("Failed to analyze meal. Please check your connection or API key.");
+      // More helpful error message for user
+      const msg = error.message || "";
+      if (msg.includes("API_KEY") || msg.includes("403")) {
+         alert("Authentication failed. Please check your Gemini API Key in Profile.");
+      } else {
+         alert("Failed to analyze meal. Please check your internet connection.");
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -149,7 +161,7 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
 
   return (
     <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-md md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl h-[85vh] flex flex-col relative overflow-hidden">
+      <div className="bg-white w-full max-w-lg md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl h-[90vh] md:h-auto md:max-h-[85vh] flex flex-col relative overflow-hidden transition-all">
         
         {/* Loading Overlay */}
         {isAnalyzing && (
@@ -167,28 +179,28 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
         )}
 
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-2xl font-bold text-gray-900">Log Meal</h3>
+          <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Log Meal</h3>
           <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
         </div>
 
         {!selectedFood ? (
           <>
             {/* Smart Input Section */}
-            <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100 mb-6 transition-all focus-within:border-primary/30 focus-within:ring-4 focus-within:ring-primary/5">
+            <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100 mb-4 sm:mb-6 transition-all focus-within:border-primary/30 focus-within:ring-4 focus-within:ring-primary/5 shrink-0">
               <textarea
                 placeholder="Describe your meal (e.g. '2 idli with sambar') or search database..."
-                className="w-full bg-transparent border-none focus:ring-0 text-gray-800 placeholder-gray-400 resize-none h-20 text-lg leading-relaxed"
+                className="w-full bg-transparent border-none focus:ring-0 text-gray-800 placeholder-gray-400 resize-none h-20 text-base sm:text-lg leading-relaxed"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 autoFocus
               />
               
               {selectedImage && (
-                <div className="relative mt-2 mb-4 w-20 h-20">
+                <div className="relative mt-2 mb-4 w-16 h-16 sm:w-20 sm:h-20">
                   <img src={selectedImage} alt="Preview" className="w-full h-full object-cover rounded-xl border border-gray-200" />
                   <button 
                     onClick={() => setSelectedImage(null)}
-                    className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-red-500"
+                    className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-red-500 scale-75 sm:scale-100"
                   >
                     <Icons.X />
                   </button>
@@ -215,7 +227,7 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
                 <button 
                   onClick={analyzeWithAI}
                   disabled={isAnalyzing || (!query && !selectedImage)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${
+                  className={`flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 rounded-xl font-bold text-sm sm:text-base transition-all ${
                     isAnalyzing || (!query && !selectedImage)
                       ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                       : 'bg-primary text-white shadow-lg shadow-green-100 hover:scale-105 active:scale-95'
@@ -230,16 +242,16 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
             <div className="flex-1 overflow-y-auto custom-scrollbar">
               {results.length > 0 && (
                 <div className="space-y-2">
-                  <div className="px-2 text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Quick Add from Database</div>
+                  <div className="px-2 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Quick Add from Database</div>
                   {results.map(food => (
                     <div 
                       key={food.id} 
                       onClick={() => setSelectedFood(food)}
-                      className="p-4 rounded-2xl hover:bg-green-50 active:bg-green-100 cursor-pointer border border-transparent hover:border-green-100 transition-all flex justify-between items-center group"
+                      className="p-3 sm:p-4 rounded-2xl hover:bg-green-50 active:bg-green-100 cursor-pointer border border-transparent hover:border-green-100 transition-all flex justify-between items-center group"
                     >
                       <div>
-                        <div className="font-bold text-gray-800 group-hover:text-primary transition-colors">{food.name}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">{food.defaultPortionGrams}g • {Math.round(food.nutrientsPerGram.calories * food.defaultPortionGrams)} kcal</div>
+                        <div className="font-bold text-gray-800 text-sm sm:text-base group-hover:text-primary transition-colors">{food.name}</div>
+                        <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5">{food.defaultPortionGrams}g • {Math.round(food.nutrientsPerGram.calories * food.defaultPortionGrams)} kcal</div>
                       </div>
                       <div className="text-gray-300 group-hover:text-primary transition-colors">
                         <Icons.Plus />
@@ -249,9 +261,9 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
                 </div>
               )}
               {results.length === 0 && query.length > 1 && !isAnalyzing && !selectedImage && (
-                <div className="text-center mt-12">
-                   <p className="text-gray-400 font-medium">No direct database matches.</p>
-                   <p className="text-gray-300 text-sm mt-1">Tap <span className="font-bold text-primary">Analyze</span> to let AI handle it.</p>
+                <div className="text-center mt-12 px-4">
+                   <p className="text-gray-400 font-medium text-sm">No direct database matches.</p>
+                   <p className="text-gray-300 text-xs mt-1">Tap <span className="font-bold text-primary">Analyze</span> to let AI handle it.</p>
                 </div>
               )}
             </div>
@@ -259,44 +271,44 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
         ) : (
           /* Food Quantity Adjustment View */
           <div className="flex-1 flex flex-col">
-            <div className="flex-1">
-              <h4 className="text-xl font-bold text-gray-800 mb-1">{selectedFood.name}</h4>
-              <p className="text-sm text-gray-500 mb-8">{selectedFood.category}</p>
+            <div className="flex-1 overflow-y-auto">
+              <h4 className="text-lg sm:text-xl font-bold text-gray-800 mb-1">{selectedFood.name}</h4>
+              <p className="text-xs sm:text-sm text-gray-500 mb-6 sm:mb-8">{selectedFood.category}</p>
               
               <div className="flex items-center gap-4 mb-8">
                 <button 
                   onClick={() => setQuantity(Math.max(10, quantity - 10))}
-                  className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-xl font-bold text-gray-600 active:bg-gray-200"
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-100 flex items-center justify-center text-lg sm:text-xl font-bold text-gray-600 active:bg-gray-200"
                 >-</button>
                 <div className="flex-1 text-center">
-                  <div className="text-4xl font-black text-primary">{quantity}</div>
-                  <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Grams</div>
+                  <div className="text-3xl sm:text-4xl font-black text-primary">{quantity}</div>
+                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest">Grams</div>
                 </div>
                 <button 
                   onClick={() => setQuantity(quantity + 10)}
-                  className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-xl font-bold text-gray-600 active:bg-gray-200"
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-100 flex items-center justify-center text-lg sm:text-xl font-bold text-gray-600 active:bg-gray-200"
                 >+</button>
               </div>
 
-              <div className="bg-gray-50 p-6 rounded-2xl grid grid-cols-2 gap-4 text-center">
+              <div className="bg-gray-50 p-4 sm:p-6 rounded-2xl grid grid-cols-2 gap-4 text-center">
                 <div>
-                  <div className="text-xs font-bold text-gray-400 uppercase">Calories</div>
-                  <div className="text-xl font-black text-gray-800">
+                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase">Calories</div>
+                  <div className="text-lg sm:text-xl font-black text-gray-800">
                     {Math.round(selectedFood.nutrientsPerGram.calories * quantity)}
                   </div>
                 </div>
                  <div>
-                  <div className="text-xs font-bold text-gray-400 uppercase">Protein</div>
-                  <div className="text-xl font-black text-gray-800">
+                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase">Protein</div>
+                  <div className="text-lg sm:text-xl font-black text-gray-800">
                     {(selectedFood.nutrientsPerGram.protein * quantity).toFixed(1)}g
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-4 pt-4">
-              <button onClick={() => setSelectedFood(null)} className="flex-1 py-4 bg-gray-100 rounded-2xl font-bold text-gray-600">Back</button>
-              <button onClick={handleLocalAdd} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100">Add Meal</button>
+            <div className="flex gap-3 sm:gap-4 pt-4 mt-auto">
+              <button onClick={() => setSelectedFood(null)} className="flex-1 py-3 sm:py-4 bg-gray-100 rounded-2xl font-bold text-gray-600 text-sm sm:text-base">Back</button>
+              <button onClick={handleLocalAdd} className="flex-[2] py-3 sm:py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 text-sm sm:text-base">Add Meal</button>
             </div>
           </div>
         )}
@@ -305,81 +317,201 @@ const ManualEntryModal = ({ onClose, onAdd, apiKey }: { onClose: () => void, onA
   );
 };
 
-const CalorieEditor = ({ current, onSave, onClose }: { current: number, onSave: (v: number) => void, onClose: () => void }) => {
-  const [val, setVal] = useState(current);
+const MacroEditor = ({ current, onSave, onClose }: { current: NutritionTargets, onSave: (t: NutritionTargets) => void, onClose: () => void }) => {
+  const [targets, setTargets] = useState(current);
+
+  const handleChange = (field: keyof NutritionTargets, value: number) => {
+    setTargets(prev => ({ ...prev, [field]: value }));
+  };
   
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative">
-        <button onClick={onClose} className="absolute right-6 top-6 p-2 bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
+      <div className="bg-white w-full max-w-sm rounded-[2rem] p-6 sm:p-8 shadow-2xl relative">
+        <button onClick={onClose} className="absolute right-5 top-5 sm:right-6 sm:top-6 p-2 bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
           <Icons.X />
         </button>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">Set Daily Goal</h3>
-        <p className="text-gray-500 mb-8 text-sm">Adjust your calorie target based on your current fitness goals.</p>
+        <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Edit Goals</h3>
+        <p className="text-gray-500 mb-6 text-xs sm:text-sm">Fine-tune your daily targets.</p>
         
-        <div className="mb-8">
-          <div className="flex items-center justify-center gap-2 mb-4">
+        <div className="space-y-5 sm:space-y-6">
+          {/* Calories */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+               <label className="text-xs sm:text-sm font-bold text-gray-600 uppercase">Calories</label>
+               <span className="text-xl sm:text-2xl font-black text-primary">{targets.calories}</span>
+            </div>
             <input 
-              type="number" 
-              value={val}
-              onChange={(e) => setVal(Number(e.target.value))}
-              className="text-5xl font-extrabold text-primary w-full text-center focus:outline-none bg-transparent"
+              type="range" 
+              min="1200" max="4000" step="50"
+              value={targets.calories}
+              onChange={(e) => handleChange('calories', Number(e.target.value))}
+              className="w-full h-2 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-primary"
             />
-            <span className="text-lg font-bold text-gray-300 pt-4">kcal</span>
           </div>
-          <input 
-            type="range" 
-            min="1200" 
-            max="4000" 
-            step="50"
-            value={val}
-            onChange={(e) => setVal(Number(e.target.value))}
-            className="w-full h-3 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-primary"
-          />
-          <div className="flex justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-3">
-            <span>Min 1200</span>
-            <span>Max 4000</span>
+
+          <div className="grid grid-cols-3 gap-3 sm:gap-4">
+            {/* Protein */}
+            <div>
+               <label className="text-[9px] sm:text-[10px] font-bold text-blue-500 uppercase block mb-1">Protein (g)</label>
+               <input 
+                 type="number"
+                 value={targets.protein}
+                 onChange={(e) => handleChange('protein', Number(e.target.value))}
+                 className="w-full p-2 sm:p-3 bg-blue-50 rounded-xl text-center font-bold text-sm sm:text-base text-blue-700 outline-none focus:ring-2 focus:ring-blue-200"
+               />
+            </div>
+            {/* Carbs */}
+            <div>
+               <label className="text-[9px] sm:text-[10px] font-bold text-yellow-500 uppercase block mb-1">Carbs (g)</label>
+               <input 
+                 type="number"
+                 value={targets.carbs}
+                 onChange={(e) => handleChange('carbs', Number(e.target.value))}
+                 className="w-full p-2 sm:p-3 bg-yellow-50 rounded-xl text-center font-bold text-sm sm:text-base text-yellow-700 outline-none focus:ring-2 focus:ring-yellow-200"
+               />
+            </div>
+            {/* Fat */}
+            <div>
+               <label className="text-[9px] sm:text-[10px] font-bold text-purple-500 uppercase block mb-1">Fat (g)</label>
+               <input 
+                 type="number"
+                 value={targets.fat}
+                 onChange={(e) => handleChange('fat', Number(e.target.value))}
+                 className="w-full p-2 sm:p-3 bg-purple-50 rounded-xl text-center font-bold text-sm sm:text-base text-purple-700 outline-none focus:ring-2 focus:ring-purple-200"
+               />
+            </div>
           </div>
         </div>
 
         <button 
-          onClick={() => { onSave(val); onClose(); }}
-          className="w-full py-4 bg-primary text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-100 hover:bg-green-600 hover:shadow-xl active:scale-[0.98] transition-all"
+          onClick={() => { onSave(targets); onClose(); }}
+          className="w-full py-3 sm:py-4 bg-primary text-white rounded-2xl font-bold text-base sm:text-lg shadow-lg shadow-green-100 hover:bg-green-600 hover:shadow-xl active:scale-[0.98] transition-all mt-6 sm:mt-8"
         >
-          Update Goal
+          Save Changes
         </button>
       </div>
     </div>
   );
 };
 
-const ResultSummary = ({ items, onConfirm, onCancel }: { items: MealItem[], onConfirm: () => void, onCancel: () => void }) => {
+const ResultSummary = ({ items, onUpdate, onConfirm, onCancel }: { items: MealItem[], onUpdate: (items: MealItem[]) => void, onConfirm: () => void, onCancel: () => void }) => {
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editGrams, setEditGrams] = useState<string>("");
+
   const totalCalories = items.reduce((acc, item) => acc + item.nutrients.calories, 0);
+
+  const handleDelete = (index: number) => {
+    const newItems = [...items];
+    newItems.splice(index, 1);
+    onUpdate(newItems);
+  };
+
+  const startEdit = (index: number, currentGrams: number) => {
+    setEditingIndex(index);
+    setEditGrams(String(currentGrams));
+  };
+
+  const saveEdit = (index: number) => {
+    const grams = parseFloat(editGrams);
+    if (isNaN(grams) || grams <= 0) {
+        setEditingIndex(null);
+        return;
+    }
+
+    const item = items[index];
+    const ratio = grams / item.portionGrams;
+    
+    // Scale all nutrients
+    const newNutrients = {
+        ...item.nutrients,
+        calories: Math.round(item.nutrients.calories * ratio),
+        protein: parseFloat((item.nutrients.protein * ratio).toFixed(1)),
+        carbs: parseFloat((item.nutrients.carbs * ratio).toFixed(1)),
+        fat: parseFloat((item.nutrients.fat * ratio).toFixed(1)),
+        fiber: parseFloat((item.nutrients.fiber * ratio).toFixed(1)),
+    };
+
+    // Reconstruct Label carefully
+    const namePart = item.portionLabel.replace(/^\d+(\.\d+)?g\s*/i, "") || item.portionLabel;
+    
+    const newItem = {
+        ...item,
+        portionGrams: grams,
+        portionLabel: `${grams}g ${namePart}`,
+        nutrients: newNutrients
+    };
+
+    const newItems = [...items];
+    newItems[index] = newItem;
+    onUpdate(newItems);
+    setEditingIndex(null);
+  };
   
   return (
     <div className="fixed inset-0 z-[150] flex items-end justify-center p-0 bg-black/40 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-md rounded-t-[3rem] p-8 shadow-2xl animate-slide-up flex flex-col gap-6">
+      <div className="bg-white w-full max-w-lg rounded-t-[2.5rem] p-6 sm:p-8 shadow-2xl animate-slide-up flex flex-col gap-4 sm:gap-6 max-h-[90vh]">
         <div className="flex justify-between items-center">
-          <h3 className="text-2xl font-extrabold text-gray-900">Meal Detected</h3>
-          <div className="bg-green-100 text-primary px-3 py-1 rounded-lg text-sm font-bold">AI Identified</div>
+          <h3 className="text-xl sm:text-2xl font-extrabold text-gray-900">Meal Detected</h3>
+          <div className="bg-green-100 text-primary px-3 py-1 rounded-lg text-xs sm:text-sm font-bold">AI Identified</div>
         </div>
 
-        <div className="space-y-4 max-h-[30vh] overflow-y-auto custom-scrollbar">
-          {items.map((item, idx) => (
-            <div key={idx} className="flex flex-col p-4 bg-gray-50 rounded-2xl">
+        <div className="space-y-3 sm:space-y-4 overflow-y-auto custom-scrollbar flex-1 min-h-[20vh]">
+          {items.length === 0 ? (
+             <div className="text-center py-8 text-gray-400 text-sm">No items. Scan again or add manually.</div>
+          ) : items.map((item, idx) => (
+            <div key={idx} className="flex flex-col p-3 sm:p-4 bg-gray-50 rounded-2xl border border-gray-100 transition-all hover:border-primary/20">
               <div className="flex justify-between items-center mb-1">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-lg">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-lg flex-shrink-0">
                     {item.portionLabel.toLowerCase().includes('roti') ? '🥯' : 
                       item.portionLabel.toLowerCase().includes('rice') ? '🍚' : 
                       item.portionLabel.toLowerCase().includes('banana') ? '🍌' : '🍲'}
                   </div>
-                  <div>
-                    <div className="font-bold text-gray-800 text-sm">{item.portionLabel}</div>
-                    <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{item.manuallyAdded ? 'Manual Entry' : 'Confidence High'}</div>
-                  </div>
+                  
+                  {editingIndex === idx ? (
+                      <div className="flex items-center gap-2">
+                          <input 
+                             type="number" 
+                             value={editGrams}
+                             onChange={e => setEditGrams(e.target.value)}
+                             className="w-16 p-1 bg-white border border-primary rounded-lg font-bold text-center outline-none text-sm"
+                             autoFocus
+                          />
+                          <span className="text-sm font-bold text-gray-500">g</span>
+                      </div>
+                  ) : (
+                      <div className="min-w-0">
+                        <div className="font-bold text-gray-800 text-sm truncate">{item.portionLabel}</div>
+                        <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{item.manuallyAdded ? 'Manual' : 'High Conf'}</div>
+                      </div>
+                  )}
                 </div>
-                <div className="font-black text-gray-900">{item.nutrients.calories} kcal</div>
+
+                <div className="flex items-center gap-3">
+                    {editingIndex === idx ? (
+                        <button onClick={() => saveEdit(idx)} className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200">
+                            <Icons.Check />
+                        </button>
+                    ) : (
+                        <>
+                            <div className="font-black text-gray-900 text-sm whitespace-nowrap">{item.nutrients.calories} kcal</div>
+                            <div className="flex gap-1">
+                                <button 
+                                    onClick={() => startEdit(idx, item.portionGrams)}
+                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-primary hover:bg-white rounded-lg transition-colors"
+                                >
+                                    <Icons.Pencil />
+                                </button>
+                                <button 
+                                    onClick={() => handleDelete(idx)}
+                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-red-500 hover:bg-white rounded-lg transition-colors"
+                                >
+                                    <Icons.Trash />
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
               </div>
               
               {/* Micronutrients display */}
@@ -396,21 +528,22 @@ const ResultSummary = ({ items, onConfirm, onCancel }: { items: MealItem[], onCo
           ))}
         </div>
 
-        <div className="flex justify-between items-center p-6 bg-primary/5 rounded-[2rem] border border-primary/10">
-          <span className="font-bold text-gray-500">Total Calories</span>
-          <span className="text-3xl font-black text-primary">{totalCalories} kcal</span>
+        <div className="flex justify-between items-center p-4 sm:p-6 bg-primary/5 rounded-[2rem] border border-primary/10 mt-auto">
+          <span className="font-bold text-gray-500 text-sm sm:text-base">Total Calories</span>
+          <span className="text-2xl sm:text-3xl font-black text-primary">{totalCalories} kcal</span>
         </div>
 
         <div className="flex gap-4">
           <button 
             onClick={onCancel}
-            className="flex-1 py-4 bg-gray-100 text-gray-800 rounded-2xl font-bold hover:bg-gray-200 active:scale-95 transition-all"
+            className="flex-1 py-3 sm:py-4 bg-gray-100 text-gray-800 rounded-2xl font-bold hover:bg-gray-200 active:scale-95 transition-all text-sm sm:text-base"
           >
             Cancel
           </button>
           <button 
             onClick={onConfirm}
-            className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 hover:bg-green-600 active:scale-95 transition-all"
+            disabled={items.length === 0}
+            className="flex-[2] py-3 sm:py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 hover:bg-green-600 active:scale-95 transition-all disabled:opacity-50 disabled:shadow-none text-sm sm:text-base"
           >
             Log Meal
           </button>
@@ -437,32 +570,32 @@ const HomeView = ({
   setIsScanning: (b: boolean) => void,
   setIsManualAdd: (b: boolean) => void
 }) => (
-  <div className="md:grid md:grid-cols-2 md:gap-12 animate-in fade-in duration-500">
+  <div className="flex flex-col gap-6 md:grid md:grid-cols-2 md:gap-12 animate-in fade-in duration-500 pb-24 md:pb-0">
     {/* Left Side: Stats */}
-    <section className="space-y-8">
-      <div>
-        <h2 className="text-3xl font-black text-gray-900 tracking-tight">Hello, {userProfile.name.split(' ')[0]}!</h2>
-        <p className="text-gray-500 font-medium">Ready for your {log.targets.calories} kcal goal?</p>
+    <section className="space-y-5 sm:space-y-8">
+      <div className="px-1">
+        <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">Hello, {userProfile.name.split(' ')[0]}!</h2>
+        <p className="text-sm sm:text-base text-gray-500 font-medium">Ready for your {log.targets.calories} kcal goal?</p>
       </div>
 
-      {/* Nutrition Card */}
+      {/* Nutrition Card - Responsive Padding & Sizing */}
       <div 
         onClick={() => setEditingCalories(true)}
-        className="group relative bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.06)] hover:border-primary/20 transition-all cursor-pointer overflow-hidden"
+        className="group relative bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.06)] hover:border-primary/20 transition-all cursor-pointer overflow-hidden"
       >
         <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:opacity-10 transition-opacity">
           <Icons.Flame />
         </div>
 
-        <div className="flex justify-between items-start mb-8">
+        <div className="flex justify-between items-start mb-6 sm:mb-8">
           <div>
-            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 group-hover:text-primary transition-colors">
+            <h3 className="text-base sm:text-lg font-bold text-gray-800 flex items-center gap-2 group-hover:text-primary transition-colors">
               Today's Nutrition
               <span className="text-gray-300"><Icons.Pencil /></span>
             </h3>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Database: {APP_CONFIG.dbVersion}</p>
+            <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Database: {APP_CONFIG.dbVersion}</p>
           </div>
-          <div className="p-3 bg-orange-50 text-orange-500 rounded-2xl shadow-sm">
+          <div className="p-2 sm:p-3 bg-orange-50 text-orange-500 rounded-2xl shadow-sm">
             <Icons.Flame />
           </div>
         </div>
@@ -470,14 +603,14 @@ const HomeView = ({
         <div className="space-y-6">
           <div>
             <div className="flex justify-between items-end mb-3">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Calories</span>
+              <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest">Calories</span>
               <div className="text-right">
-                <span className="text-4xl font-black text-gray-900">{log.totalNutrients.calories}</span>
-                <span className="text-lg font-bold text-gray-300 mx-2">/</span>
-                <span className="text-lg font-bold text-primary">{log.targets.calories}</span>
+                <span className="text-3xl sm:text-4xl font-black text-gray-900">{log.totalNutrients.calories}</span>
+                <span className="text-sm sm:text-lg font-bold text-gray-300 mx-2">/</span>
+                <span className="text-sm sm:text-lg font-bold text-primary">{log.targets.calories}</span>
               </div>
             </div>
-            <div className="h-4 bg-gray-50 rounded-full overflow-hidden shadow-inner border border-gray-100">
+            <div className="h-3 sm:h-4 bg-gray-50 rounded-full overflow-hidden shadow-inner border border-gray-100">
               <div 
                 className="h-full bg-gradient-to-r from-primary to-green-300 rounded-full transition-all duration-700 ease-out"
                 style={{ width: `${calPercent}%` }}
@@ -485,7 +618,7 @@ const HomeView = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <MacroStat label="Protein" val={log.totalNutrients.protein} target={log.targets.protein} color="bg-blue-50 text-blue-600" />
             <MacroStat label="Carbs" val={log.totalNutrients.carbs} target={log.targets.carbs} color="bg-yellow-50 text-yellow-600" />
             <MacroStat label="Fat" val={log.totalNutrients.fat} target={log.targets.fat} color="bg-purple-50 text-purple-600" />
@@ -495,60 +628,60 @@ const HomeView = ({
     </section>
 
     {/* Right Side: Actions & Logs */}
-    <section className="mt-12 md:mt-0 space-y-8">
+    <section className="space-y-5 sm:space-y-8">
       
       {/* Action Buttons */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
         <button 
           onClick={() => setIsScanning(true)}
-          className="flex flex-col items-center justify-center gap-4 bg-primary text-white p-8 rounded-[2.5rem] font-bold shadow-lg shadow-green-100 hover:shadow-xl hover:bg-green-600 active:scale-95 transition-all group"
+          className="flex flex-col items-center justify-center gap-3 sm:gap-4 bg-primary text-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] font-bold shadow-lg shadow-green-100 hover:shadow-xl hover:bg-green-600 active:scale-95 transition-all group"
         >
-          <div className="p-4 bg-white/20 rounded-2xl group-hover:scale-110 transition-transform">
+          <div className="p-3 sm:p-4 bg-white/20 rounded-2xl group-hover:scale-110 transition-transform">
             <Icons.Camera />
           </div>
-          <span className="text-sm tracking-wide">Scan Meal</span>
+          <span className="text-xs sm:text-sm tracking-wide">Scan Meal</span>
         </button>
 
         <button 
           onClick={() => setIsManualAdd(true)}
-          className="flex flex-col items-center justify-center gap-4 bg-white text-gray-800 p-8 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-lg hover:border-primary/20 active:scale-95 transition-all group"
+          className="flex flex-col items-center justify-center gap-3 sm:gap-4 bg-white text-gray-800 p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-lg hover:border-primary/20 active:scale-95 transition-all group"
         >
-          <div className="p-4 bg-gray-50 text-primary rounded-2xl group-hover:scale-110 transition-transform">
+          <div className="p-3 sm:p-4 bg-gray-50 text-primary rounded-2xl group-hover:scale-110 transition-transform">
             <Icons.Plus />
           </div>
-          <span className="text-sm tracking-wide">Manual Add</span>
+          <span className="text-xs sm:text-sm tracking-wide">Manual Add</span>
         </button>
       </div>
 
       {/* Recent Meals List */}
-      <div className="bg-white p-8 rounded-[2.5rem] border border-gray-50 shadow-sm">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold text-gray-800">Recent Meals</h3>
-          <button className="text-xs font-bold text-primary uppercase tracking-widest hover:underline">View All</button>
+      <div className="bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-50 shadow-sm">
+        <div className="flex justify-between items-center mb-4 sm:mb-6">
+          <h3 className="text-lg sm:text-xl font-bold text-gray-800">Recent Meals</h3>
+          <button className="text-[10px] sm:text-xs font-bold text-primary uppercase tracking-widest hover:underline">View All</button>
         </div>
 
         {log.meals.length === 0 ? (
-          <div className="py-12 flex flex-col items-center text-center">
-            <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4 text-gray-200">
+          <div className="py-8 sm:py-12 flex flex-col items-center text-center">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4 text-gray-200">
               <Icons.Book />
             </div>
-            <p className="text-gray-400 text-sm font-medium">No meals logged yet today.</p>
-            <p className="text-gray-300 text-xs mt-1">Use the camera to track your first meal.</p>
+            <p className="text-gray-400 text-xs sm:text-sm font-medium">No meals logged yet today.</p>
+            <p className="text-gray-300 text-[10px] sm:text-xs mt-1">Use the camera to track your first meal.</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {log.meals.slice().reverse().map(meal => (
-              <div key={meal.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl hover:bg-green-50 transition-colors cursor-pointer group">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-lg">
+              <div key={meal.id} className="flex justify-between items-center p-3 sm:p-4 bg-gray-50 rounded-2xl hover:bg-green-50 transition-colors cursor-pointer group">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-base sm:text-lg">
                     {meal.mealType === 'Breakfast' ? '🍳' : meal.mealType === 'Lunch' ? '🍛' : '🥗'}
                   </div>
                   <div>
-                    <span className="block font-bold text-gray-800 text-sm group-hover:text-primary transition-colors">{meal.mealType}</span>
-                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{meal.items.length} items</span>
+                    <span className="block font-bold text-gray-800 text-xs sm:text-sm group-hover:text-primary transition-colors">{meal.mealType}</span>
+                    <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold uppercase tracking-widest">{meal.items.length} items</span>
                   </div>
                 </div>
-                <span className="font-black text-gray-900 text-sm">{meal.totalNutrients.calories} kcal</span>
+                <span className="font-black text-gray-900 text-xs sm:text-sm">{meal.totalNutrients.calories} kcal</span>
               </div>
             ))}
           </div>
@@ -559,27 +692,27 @@ const HomeView = ({
 );
 
 const HistoryView = ({ log }: { log: DailyLog }) => (
-  <div className="animate-in fade-in duration-500">
-     <h2 className="text-3xl font-black text-gray-900 tracking-tight mb-8">History</h2>
-     <div className="bg-white p-8 rounded-[2.5rem] border border-gray-50 shadow-sm">
-        <h3 className="text-xl font-bold text-gray-800 mb-6">Today's Log</h3>
+  <div className="animate-in fade-in duration-500 pb-24 md:pb-0">
+     <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight mb-6 sm:mb-8 px-1">History</h2>
+     <div className="bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-50 shadow-sm">
+        <h3 className="text-lg sm:text-xl font-bold text-gray-800 mb-4 sm:mb-6">Today's Log</h3>
         {log.meals.length === 0 ? (
-            <p className="text-gray-400 text-center py-10">No history for today.</p>
+            <p className="text-gray-400 text-center py-10 text-sm">No history for today.</p>
         ) : (
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
                 {log.meals.map(meal => (
                     <div key={meal.id} className="border-b border-gray-50 pb-4 last:border-0 last:pb-0">
                         <div className="flex justify-between mb-2">
-                             <span className="font-bold text-gray-800">{meal.mealType}</span>
+                             <span className="font-bold text-gray-800 text-sm sm:text-base">{meal.mealType}</span>
                              <span className="text-gray-400 text-xs">{meal.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                         </div>
                         {meal.items.map((item, idx) => (
-                             <div key={idx} className="flex justify-between text-sm text-gray-600 pl-2 border-l-2 border-gray-100 my-2">
+                             <div key={idx} className="flex justify-between text-xs sm:text-sm text-gray-600 pl-2 border-l-2 border-gray-100 my-2">
                                  <span>{item.portionLabel}</span>
                                  <span>{item.nutrients.calories} kcal</span>
                              </div>
                         ))}
-                        <div className="text-right font-black text-primary text-sm mt-2">
+                        <div className="text-right font-black text-primary text-xs sm:text-sm mt-2">
                             Total: {meal.totalNutrients.calories} kcal
                         </div>
                     </div>
@@ -591,58 +724,58 @@ const HistoryView = ({ log }: { log: DailyLog }) => (
 );
 
 const ProfileView = ({ profile }: { profile: UserProfile }) => (
-    <div className="animate-in fade-in duration-500 space-y-6">
-        <h2 className="text-3xl font-black text-gray-900 tracking-tight">Profile</h2>
+    <div className="animate-in fade-in duration-500 space-y-4 sm:space-y-6 pb-24 md:pb-0">
+        <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight px-1">Profile</h2>
         
-        <div className="bg-white p-8 rounded-[2.5rem] border border-gray-50 shadow-sm flex items-center gap-6">
-            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center text-3xl font-bold text-gray-400">
+        <div className="bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-50 shadow-sm flex items-center gap-4 sm:gap-6">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-100 rounded-full flex items-center justify-center text-2xl sm:text-3xl font-bold text-gray-400">
                 {profile.name.charAt(0)}
             </div>
             <div>
-                <h3 className="text-xl font-bold text-gray-900">{profile.name}</h3>
-                <p className="text-gray-500 text-sm">Goal: {profile.goal}</p>
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900">{profile.name}</h3>
+                <p className="text-gray-500 text-xs sm:text-sm">Goal: {profile.goal}</p>
             </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-             <div className="bg-white p-6 rounded-[2rem] border border-gray-50">
-                 <div className="text-xs text-gray-400 font-bold uppercase mb-1">Weight</div>
-                 <div className="text-2xl font-black text-gray-900">{profile.weightKg} kg</div>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+             <div className="bg-white p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-gray-50">
+                 <div className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase mb-1">Weight</div>
+                 <div className="text-xl sm:text-2xl font-black text-gray-900">{profile.weightKg} kg</div>
              </div>
-             <div className="bg-white p-6 rounded-[2rem] border border-gray-50">
-                 <div className="text-xs text-gray-400 font-bold uppercase mb-1">Height</div>
-                 <div className="text-2xl font-black text-gray-900">{profile.heightCm} cm</div>
+             <div className="bg-white p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-gray-50">
+                 <div className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase mb-1">Height</div>
+                 <div className="text-xl sm:text-2xl font-black text-gray-900">{profile.heightCm} cm</div>
              </div>
         </div>
 
         {profile.targets && (
-            <div className="bg-white p-6 rounded-[2rem] border border-gray-50">
-                <h3 className="font-bold text-gray-800 mb-4">Your Daily Plan</h3>
-                <div className="grid grid-cols-3 gap-4 text-center mb-6">
+            <div className="bg-white p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-gray-50">
+                <h3 className="font-bold text-gray-800 mb-4 text-sm sm:text-base">Your Daily Plan</h3>
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center mb-6">
                     <div>
-                        <div className="text-xs text-gray-400 uppercase">Protein</div>
-                        <div className="font-bold text-gray-900">{profile.targets.protein}g</div>
+                        <div className="text-[9px] sm:text-xs text-gray-400 uppercase">Protein</div>
+                        <div className="font-bold text-gray-900 text-sm sm:text-base">{profile.targets.protein}g</div>
                     </div>
                     <div>
-                        <div className="text-xs text-gray-400 uppercase">Carbs</div>
-                        <div className="font-bold text-gray-900">{profile.targets.carbs}g</div>
+                        <div className="text-[9px] sm:text-xs text-gray-400 uppercase">Carbs</div>
+                        <div className="font-bold text-gray-900 text-sm sm:text-base">{profile.targets.carbs}g</div>
                     </div>
                     <div>
-                         <div className="text-xs text-gray-400 uppercase">Fat</div>
-                        <div className="font-bold text-gray-900">{profile.targets.fat}g</div>
+                         <div className="text-[9px] sm:text-xs text-gray-400 uppercase">Fat</div>
+                        <div className="font-bold text-gray-900 text-sm sm:text-base">{profile.targets.fat}g</div>
                     </div>
                 </div>
 
                 {/* Added Micros Section in Profile */}
-                <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-4">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3 border-t border-gray-100 pt-4">
                     <div className="text-center">
-                        <div className="text-xs text-green-500 uppercase font-bold">Fiber</div>
-                        <div className="font-bold text-gray-800">{profile.targets.fiber}g</div>
+                        <div className="text-[9px] sm:text-xs text-green-500 uppercase font-bold">Fiber</div>
+                        <div className="font-bold text-gray-800 text-sm sm:text-base">{profile.targets.fiber}g</div>
                     </div>
                     {profile.targets.micros && profile.targets.micros.map((m, idx) => (
                          <div key={idx} className="text-center">
-                            <div className="text-xs text-gray-400 uppercase truncate" title={m.name}>{m.name}</div>
-                            <div className="font-bold text-gray-800 truncate">{m.amount}</div>
+                            <div className="text-[9px] sm:text-xs text-gray-400 uppercase truncate" title={m.name}>{m.name}</div>
+                            <div className="font-bold text-gray-800 text-sm sm:text-base truncate">{m.amount}</div>
                         </div>
                     ))}
                 </div>
@@ -688,9 +821,17 @@ const App: React.FC = () => {
     setLog(updatedLog);
   };
 
-  const updateTarget = async (newVal: number) => {
-    if (!log) return;
-    const newTargets = { ...log.targets, calories: newVal };
+  const updateTargets = async (newTargets: NutritionTargets) => {
+    if (!log || !userProfile) return;
+    
+    // 1. Update Profile (Persistent change)
+    const updatedProfile = { ...userProfile, targets: newTargets };
+    // Remove ID before saving as saveUserProfile handles it
+    const { id, ...profileData } = updatedProfile;
+    await saveUserProfile(profileData);
+    setUserProfile(updatedProfile);
+
+    // 2. Update Daily Log (Immediate reflection)
     await updateDailyTargets(newTargets);
     setLog({ ...log, targets: newTargets });
   };
@@ -770,9 +911,9 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-[#F8F9FA] text-text selection:bg-primary/20">
         
         {editingCalories && (
-          <CalorieEditor 
-            current={log.targets.calories} 
-            onSave={updateTarget} 
+          <MacroEditor 
+            current={log.targets} 
+            onSave={updateTargets} 
             onClose={() => setEditingCalories(false)} 
           />
         )}
@@ -796,6 +937,7 @@ const App: React.FC = () => {
         {detectedItems && (
           <ResultSummary 
             items={detectedItems} 
+            onUpdate={setDetectedItems}
             onConfirm={confirmMeal} 
             onCancel={() => setDetectedItems(null)} 
           />
@@ -804,28 +946,28 @@ const App: React.FC = () => {
         {/* AI Guidance Floating Button */}
         <AIGuidance apiKey={userProfile.apiKey} userProfile={userProfile} dailyLog={log} />
 
-        {/* Desktop Container Wrapper */}
-        <div className="mx-auto max-w-md md:max-w-5xl md:pt-10 md:pb-10 min-h-screen md:min-h-0 flex flex-col md:flex-row md:gap-8">
+        {/* Responsive Desktop/Mobile Container Wrapper */}
+        <div className="mx-auto w-full md:max-w-6xl md:h-[95vh] md:my-auto flex flex-col md:flex-row md:gap-6 justify-center">
           
           {/* Main Content Area */}
-          <div className="flex-1 bg-white md:rounded-[3rem] shadow-sm md:shadow-2xl md:border md:border-gray-100 flex flex-col relative overflow-hidden">
+          <div className="w-full h-full md:h-auto bg-white md:rounded-[3rem] shadow-none md:shadow-2xl md:border md:border-gray-100 flex flex-col relative overflow-hidden">
             
             {/* Header */}
-            <header className="px-8 py-8 flex justify-between items-center border-b border-gray-50">
+            <header className="px-5 py-5 sm:px-8 sm:py-8 flex justify-between items-center border-b border-gray-50">
               <div>
-                <h1 className="text-2xl font-extrabold text-primary tracking-tight">NutriTrack</h1>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Indian Food Lens</p>
+                <h1 className="text-xl sm:text-2xl font-extrabold text-primary tracking-tight">NutriTrack</h1>
+                <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 sm:mt-1">Indian Food Lens</p>
               </div>
               <button 
                 onClick={() => setCurrentView('profile')}
-                className="w-12 h-12 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center hover:bg-gray-100 transition-colors group"
+                className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center hover:bg-gray-100 transition-colors group"
               >
-                <span className="text-sm font-bold text-gray-400 group-hover:text-primary transition-colors">{userProfile.name.charAt(0)}</span>
+                <span className="text-xs sm:text-sm font-bold text-gray-400 group-hover:text-primary transition-colors">{userProfile.name.charAt(0)}</span>
               </button>
             </header>
 
             {/* Content */}
-            <main className="flex-1 px-8 py-8 overflow-y-auto pb-32 md:pb-12">
+            <main className="flex-1 px-5 py-5 sm:px-8 sm:py-8 overflow-y-auto custom-scrollbar">
                {currentView === 'home' && (
                   <HomeView 
                     log={log} 
@@ -841,7 +983,7 @@ const App: React.FC = () => {
             </main>
 
             {/* Floating Navigation Bar */}
-            <nav className="fixed md:absolute bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 p-2 pb-8 md:pb-4 flex justify-around items-center z-50">
+            <nav className="fixed md:absolute bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 p-2 pb-6 md:pb-4 flex justify-around items-center z-50">
               <NavIcon 
                 icon={<Icons.Home />} 
                 label="Home" 
@@ -871,9 +1013,9 @@ const App: React.FC = () => {
 // --- Helpers ---
 
 const MacroStat = ({ label, val, target, color }: { label: string, val: number, target: number, color: string }) => (
-  <div className={`p-3 rounded-2xl text-center flex flex-col items-center ${color.split(' ')[0]}`}>
-    <span className="text-[9px] font-bold uppercase tracking-widest mb-1 opacity-60">{label}</span>
-    <span className={`text-sm font-black ${color.split(' ')[1]}`}>{val} / {target}g</span>
+  <div className={`p-2 sm:p-3 rounded-xl sm:rounded-2xl text-center flex flex-col items-center justify-between h-full ${color.split(' ')[0]}`}>
+    <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1 opacity-60 truncate w-full">{label}</span>
+    <span className={`text-xs sm:text-sm font-black truncate w-full ${color.split(' ')[1]}`}>{val}/{target}g</span>
     <div className="w-full h-1 bg-white/50 rounded-full mt-2 overflow-hidden">
       <div 
         className={`h-full ${color.split(' ')[1].replace('text', 'bg')} transition-all duration-1000`}
@@ -886,10 +1028,10 @@ const MacroStat = ({ label, val, target, color }: { label: string, val: number, 
 const NavIcon = ({ icon, label, active = false, onClick }: { icon: any, label: string, active?: boolean, onClick: () => void }) => (
   <button 
     onClick={onClick}
-    className={`flex flex-col items-center p-3 rounded-2xl transition-all duration-300 min-w-[70px] ${active ? 'text-primary bg-green-50 scale-105' : 'text-gray-300 hover:text-gray-500 hover:bg-gray-50'}`}
+    className={`flex flex-col items-center p-3 rounded-2xl transition-all duration-300 min-w-[60px] sm:min-w-[70px] ${active ? 'text-primary bg-green-50 scale-105' : 'text-gray-300 hover:text-gray-500 hover:bg-gray-50'}`}
   >
-    <span className="mb-1">{icon}</span>
-    <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
+    <span className="mb-1 scale-90 sm:scale-100">{icon}</span>
+    <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest">{label}</span>
   </button>
 );
 
