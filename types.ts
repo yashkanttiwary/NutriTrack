@@ -1,3 +1,4 @@
+
 // ============ CORE DOMAIN TYPES ============
 
 export type FoodCategory = 
@@ -66,6 +67,7 @@ export interface UserProfile {
   goal: Goal;
   dietaryPreference: DietaryPreference;
   medicalConditions: string;
+  additionalDetails?: string; // New field for free-text goals/notes
   createdAt: number;
   // AI Generated Plan Persistence
   targets: NutritionTargets; 

@@ -73,6 +73,7 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
         - Stats: ${userProfile.age}yo, ${userProfile.heightCm}cm, ${userProfile.weightKg}kg
         - Diet: ${userProfile.dietaryPreference}
         - Medical: ${userProfile.medicalConditions || "None"}
+        - Specific Notes/Goals: ${userProfile.additionalDetails || "None"}
         
         Current Plan Targets:
         - Calories: ${dailyLog.targets.calories}

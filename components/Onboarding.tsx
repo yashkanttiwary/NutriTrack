@@ -20,7 +20,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     activityLevel: 'Moderate' as ActivityLevel,
     goal: 'Maintain' as Goal,
     dietaryPreference: 'Vegetarian' as DietaryPreference,
-    medicalConditions: ''
+    medicalConditions: '',
+    additionalDetails: ''
   });
 
   const [planData, setPlanData] = useState<{
@@ -99,9 +100,11 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         - Activity: ${data.activityLevel}
         - Goal: ${data.goal}
         - Diet: ${data.dietaryPreference}
-        - Medical Conditions/Notes: ${data.medicalConditions || "None"}
+        - Medical Conditions: ${data.medicalConditions || "None"}
+        - Specific Notes/Goals: ${data.additionalDetails || "None"}
 
         Task: Calculate the optimal daily nutrition targets for this user. 
+        Take into account their medical conditions and specific notes (e.g., if they want to lose fat specifically, or have specific dietary restrictions mentioned).
         Provide strict numbers for: calories, protein (g), carbs (g), fat (g), fiber (g).
         Also provide 3-4 key micronutrient goals (e.g. Iron, Calcium, Vit D, B12, or others relevant to Indian diet/profile) suitable for their profile.
         
@@ -325,7 +328,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
 
           {step === 4 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900">Diet & Health</h2>
+              <h2 className="text-2xl font-bold text-gray-900">Health & Personalization</h2>
               
               <div className="space-y-4">
                  <div>
@@ -348,10 +351,21 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                   <textarea 
                     value={data.medicalConditions}
                     onChange={(e) => handleChange('medicalConditions', e.target.value)}
-                    className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-primary/20 outline-none font-medium text-gray-900 resize-none h-24"
+                    className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-primary/20 outline-none font-medium text-gray-900 resize-none h-20"
                     placeholder="e.g. Diabetes, PCOD, Lactose Intolerant..."
                   />
-                  <p className="text-xs text-gray-400 mt-2">AI will use this to fine-tune your recommendations.</p>
+                  <p className="text-xs text-gray-400 mt-1">AI will use this to fine-tune your recommendations.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Detailed Goals & Notes (Optional)</label>
+                  <textarea 
+                    value={data.additionalDetails}
+                    onChange={(e) => handleChange('additionalDetails', e.target.value)}
+                    className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-primary/20 outline-none font-medium text-gray-900 resize-none h-28"
+                    placeholder="Tell us more about your specific goals...&#10;e.g. 'I want to lose belly fat', 'I work night shifts', 'I hate broccoli'..."
+                  />
+                  <p className="text-xs text-gray-400 mt-1">The more details you provide, the better the plan.</p>
                 </div>
               </div>
 

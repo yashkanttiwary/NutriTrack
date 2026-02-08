@@ -436,7 +436,7 @@ const MacroEditor = ({ current, onSave, onClose }: { current: NutritionTargets, 
   );
 };
 
-const ResultSummary = ({ items, onUpdate, onConfirm, onCancel }: { items: MealItem[], onUpdate: (items: MealItem[]) => void, onConfirm: () => void, onCancel: () => void }) => {
+const ResultSummary = ({ items, onUpdate, onConfirm, onCancel, isSubmitting }: { items: MealItem[], onUpdate: (items: MealItem[]) => void, onConfirm: () => void, onCancel: () => void, isSubmitting: boolean }) => {
   const totalCalories = items.reduce((sum, item) => sum + item.nutrients.calories, 0);
 
   const handleRemove = (index: number) => {
@@ -450,7 +450,7 @@ const ResultSummary = ({ items, onUpdate, onConfirm, onCancel }: { items: MealIt
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[5000] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white w-full max-w-lg md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl flex flex-col max-h-[90vh]">
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -491,9 +491,20 @@ const ResultSummary = ({ items, onUpdate, onConfirm, onCancel }: { items: MealIt
         </div>
 
         <div className="flex gap-4">
-          <button onClick={onCancel} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">Discard</button>
-          <button onClick={onConfirm} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 flex items-center justify-center gap-2">
-            Confirm Meal <Icons.Check />
+          <button onClick={onCancel} disabled={isSubmitting} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold disabled:opacity-50">Discard</button>
+          <button 
+            onClick={onConfirm} 
+            disabled={isSubmitting}
+            className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 flex items-center justify-center gap-2 disabled:opacity-70 disabled:shadow-none transition-all"
+          >
+            {isSubmitting ? (
+              <>
+                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                 Saving...
+              </>
+            ) : (
+              <>Confirm Meal <Icons.Check /></>
+            )}
           </button>
         </div>
       </div>
@@ -825,6 +836,7 @@ const App: React.FC = () => {
   const [isManualAdd, setIsManualAdd] = useState(false);
   const [detectedItems, setDetectedItems] = useState<MealItem[] | null>(null);
   const [currentView, setCurrentView] = useState<'home' | 'history' | 'profile'>('home');
+  const [isSubmittingMeal, setIsSubmittingMeal] = useState(false);
 
   useEffect(() => {
     // Initial Load
@@ -883,46 +895,54 @@ const App: React.FC = () => {
 
   const confirmMeal = async () => {
     if (!detectedItems || !log) return;
+    setIsSubmittingMeal(true);
     
-    // Determine meal type based on time
-    const hour = new Date().getHours();
-    let mealType: Meal['mealType'] = 'Snack';
-    if (hour >= 5 && hour < 11) mealType = 'Breakfast';
-    else if (hour >= 11 && hour < 16) mealType = 'Lunch';
-    else if (hour >= 16 && hour < 22) mealType = 'Dinner';
+    try {
+        // Determine meal type based on time
+        const hour = new Date().getHours();
+        let mealType: Meal['mealType'] = 'Snack';
+        if (hour >= 5 && hour < 11) mealType = 'Breakfast';
+        else if (hour >= 11 && hour < 16) mealType = 'Lunch';
+        else if (hour >= 16 && hour < 22) mealType = 'Dinner';
 
-    // Collect all micros for the daily aggregation (HIGH-002 FIX)
-    const mealMicros: string[] = [];
-    detectedItems.forEach(item => {
-      if (item.nutrients.micros) {
-        mealMicros.push(...item.nutrients.micros);
-      }
-    });
+        // Collect all micros for the daily aggregation (HIGH-002 FIX)
+        const mealMicros: string[] = [];
+        detectedItems.forEach(item => {
+        if (item.nutrients.micros) {
+            mealMicros.push(...item.nutrients.micros);
+        }
+        });
 
-    const meal: Meal = {
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date(),
-      items: detectedItems,
-      totalNutrients: detectedItems.reduce((acc, item) => ({
-        calories: acc.calories + item.nutrients.calories,
-        protein: acc.protein + item.nutrients.protein,
-        carbs: acc.carbs + item.nutrients.carbs,
-        fat: acc.fat + item.nutrients.fat,
-        fiber: acc.fiber + item.nutrients.fiber,
-        sourceDatabase: "IFCT",
-        micros: [] // We aggregate aggregation in db.ts updateDailyLog, but good to have here too for meal object validity
-      }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sourceDatabase: "IFCT" as any, micros: [] }),
-      mealType: mealType
-    };
-    
-    // Explicitly set the collected micros on the meal total for the DB to pick up
-    // Note: The reducer above initializes to empty, so we override it here with all unique micros from the items
-    meal.totalNutrients.micros = Array.from(new Set(mealMicros));
+        const meal: Meal = {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: new Date(),
+        items: detectedItems,
+        totalNutrients: detectedItems.reduce((acc, item) => ({
+            calories: acc.calories + item.nutrients.calories,
+            protein: acc.protein + item.nutrients.protein,
+            carbs: acc.carbs + item.nutrients.carbs,
+            fat: acc.fat + item.nutrients.fat,
+            fiber: acc.fiber + item.nutrients.fiber,
+            sourceDatabase: "IFCT",
+            micros: [] // We aggregate aggregation in db.ts updateDailyLog, but good to have here too for meal object validity
+        }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sourceDatabase: "IFCT" as any, micros: [] }),
+        mealType: mealType
+        };
+        
+        // Explicitly set the collected micros on the meal total for the DB to pick up
+        // Note: The reducer above initializes to empty, so we override it here with all unique micros from the items
+        meal.totalNutrients.micros = Array.from(new Set(mealMicros));
 
-    await saveMeal(meal);
-    setDetectedItems(null);
-    const updatedLog = await getTodayLog();
-    setLog(updatedLog);
+        await saveMeal(meal);
+        setDetectedItems(null);
+        const updatedLog = await getTodayLog();
+        setLog(updatedLog);
+    } catch (error) {
+        console.error("Failed to save meal", error);
+        alert("Failed to save meal. Please try again.");
+    } finally {
+        setIsSubmittingMeal(false);
+    }
   };
 
   if (loading) return (
@@ -974,7 +994,8 @@ const App: React.FC = () => {
             items={detectedItems} 
             onUpdate={setDetectedItems}
             onConfirm={confirmMeal} 
-            onCancel={() => setDetectedItems(null)} 
+            onCancel={() => setDetectedItems(null)}
+            isSubmitting={isSubmittingMeal}
           />
         )}
 
