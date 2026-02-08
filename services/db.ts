@@ -1,4 +1,4 @@
-import { Dexie, type Table } from 'dexie';
+import Dexie, { type Table } from 'dexie';
 import { Meal, DailyLog, Nutrients, UserProfile, ChatMessage } from '../types';
 
 // Define the database class extending Dexie to leverage built-in methods
@@ -12,8 +12,10 @@ class NutritionDatabase extends Dexie {
     super('NutriTrackDB');
     
     // Define schema
-    // Version 3: Added chatMessages
-    (this as any).version(3).stores({
+    // Version 4: Bumped to ensure chatMessages table is created if it failed in v3
+    // We define previous versions to allow upgrade path if needed, but for this fix,
+    // defining the latest state as a new version is sufficient to trigger schema update.
+    this.version(4).stores({
       meals: 'id, timestamp, mealType', 
       dailyLogs: 'date',
       userProfile: 'id',
@@ -56,7 +58,7 @@ export async function getChatHistory(): Promise<ChatMessage[]> {
 // Helper to save a meal with transaction support for atomicity
 export async function saveMeal(meal: Meal) {
   // Use the transaction method from the Dexie instance
-  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
+  return await db.transaction('rw', [db.meals, db.dailyLogs], async () => {
     await db.meals.add(meal);
     await updateDailyLog(meal.timestamp);
   });
@@ -65,7 +67,7 @@ export async function saveMeal(meal: Meal) {
 // Helper to delete a meal and update the daily log
 export async function deleteMeal(id: string) {
   // Use the transaction method from the Dexie instance
-  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
+  return await db.transaction('rw', [db.meals, db.dailyLogs], async () => {
     const meal = await db.meals.get(id);
     if (!meal) return;
     
@@ -107,7 +109,7 @@ export async function updateDailyTargets(targets: DailyLog['targets']) {
   const dateStr = new Date().toISOString().split('T')[0];
   
   // Use the transaction method from the Dexie instance
-  await (db as any).transaction('rw', [db.dailyLogs], async () => {
+  await db.transaction('rw', [db.dailyLogs], async () => {
     const log = await db.dailyLogs.get(dateStr);
     if (log) {
       await db.dailyLogs.update(dateStr, { targets });
