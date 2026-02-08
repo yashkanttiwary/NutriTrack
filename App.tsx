@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getTodayLog, updateDailyTargets, saveMeal, getUserProfile, saveUserProfile, exportUserData, importUserData } from './services/db';
+import { getTodayLog, updateDailyTargets, saveMeal, getUserProfile, saveUserProfile, exportUserData, importUserData, deleteMeal } from './services/db';
 import { APP_CONFIG } from './constants';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DailyLog, MealItem, Meal, UserProfile, NutritionTargets } from './types';
@@ -9,6 +9,7 @@ import { AIGuidance } from './components/AIGuidance';
 import { ManualEntryModal } from './components/ManualEntryModal';
 import { ResultSummary } from './components/ResultSummary';
 import { MacroEditor } from './components/MacroEditor';
+import { MealDetailModal } from './components/MealDetailModal';
 import { Icons } from './components/Icons';
 
 // --- View Components ---
@@ -19,14 +20,16 @@ const HomeView = ({
   calPercent, 
   setEditingCalories, 
   setIsScanning, 
-  setIsManualAdd 
+  setIsManualAdd,
+  onMealClick
 }: { 
   log: DailyLog, 
   userProfile: UserProfile,
   calPercent: number, 
   setEditingCalories: (b: boolean) => void,
   setIsScanning: (b: boolean) => void,
-  setIsManualAdd: (b: boolean) => void
+  setIsManualAdd: (b: boolean) => void,
+  onMealClick: (meal: Meal) => void
 }) => (
   <div className="flex flex-col gap-6 md:grid md:grid-cols-2 md:gap-12 animate-in fade-in duration-500 pb-24 md:pb-0">
     {/* Left Side: Stats */}
@@ -115,7 +118,7 @@ const HomeView = ({
       <div className="bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-50 shadow-sm">
         <div className="flex justify-between items-center mb-4 sm:mb-6">
           <h3 className="text-lg sm:text-xl font-bold text-gray-800">Recent Meals</h3>
-          <button className="text-[10px] sm:text-xs font-bold text-primary uppercase tracking-widest hover:underline">View All</button>
+          <button onClick={() => {}} className="text-[10px] sm:text-xs font-bold text-primary uppercase tracking-widest hover:underline">View Details</button>
         </div>
 
         {log.meals.length === 0 ? (
@@ -129,7 +132,11 @@ const HomeView = ({
         ) : (
           <div className="space-y-3 sm:space-y-4">
             {log.meals.slice().reverse().map(meal => (
-              <div key={meal.id} className="flex justify-between items-center p-3 sm:p-4 bg-gray-50 rounded-2xl hover:bg-green-50 transition-colors cursor-pointer group">
+              <div 
+                key={meal.id} 
+                onClick={() => onMealClick(meal)}
+                className="flex justify-between items-center p-3 sm:p-4 bg-gray-50 rounded-2xl hover:bg-green-50 transition-colors cursor-pointer group"
+              >
                 <div className="flex items-center gap-3 sm:gap-4">
                   <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-base sm:text-lg">
                     {meal.mealType === 'Breakfast' ? '🍳' : meal.mealType === 'Lunch' ? '🍛' : '🥗'}
@@ -149,7 +156,7 @@ const HomeView = ({
   </div>
 );
 
-const HistoryView = ({ log }: { log: DailyLog }) => (
+const HistoryView = ({ log, onMealClick }: { log: DailyLog, onMealClick: (meal: Meal) => void }) => (
   <div className="animate-in fade-in duration-500 pb-24 md:pb-0">
      <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight mb-6 sm:mb-8 px-1">History</h2>
      <div className="bg-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-50 shadow-sm">
@@ -159,7 +166,11 @@ const HistoryView = ({ log }: { log: DailyLog }) => (
         ) : (
             <div className="space-y-5 sm:space-y-6">
                 {log.meals.map(meal => (
-                    <div key={meal.id} className="border-b border-gray-50 pb-4 last:border-0 last:pb-0">
+                    <div 
+                        key={meal.id} 
+                        onClick={() => onMealClick(meal)}
+                        className="border-b border-gray-50 pb-4 last:border-0 last:pb-0 cursor-pointer hover:bg-gray-50 transition-colors p-3 -mx-3 rounded-xl"
+                    >
                         <div className="flex justify-between mb-2">
                              <span className="font-bold text-gray-800 text-sm sm:text-base">{meal.mealType}</span>
                              <span className="text-gray-400 text-xs">{meal.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -401,6 +412,9 @@ const App: React.FC = () => {
   const [detectedItems, setDetectedItems] = useState<MealItem[] | null>(null);
   const [currentView, setCurrentView] = useState<'home' | 'history' | 'profile'>('home');
   const [isSubmittingMeal, setIsSubmittingMeal] = useState(false);
+  
+  // NEW STATE: For detailed view
+  const [selectedMeal, setSelectedMeal] = useState<Meal | null>(null);
 
   useEffect(() => {
     // Initial Load
@@ -413,7 +427,7 @@ const App: React.FC = () => {
       setLoading(false);
     }
     loadData();
-  }, [detectedItems]);
+  }, [detectedItems]); // Reload when items change (save/add)
 
   const handleOnboardingComplete = async (data: Omit<UserProfile, 'id'>) => {
     // 1. Save profile to DB
@@ -501,6 +515,20 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteMeal = async (mealId: string) => {
+    try {
+      await deleteMeal(mealId);
+      // Refresh the log after deletion
+      const updatedLog = await getTodayLog();
+      setLog(updatedLog);
+      // Close modal if open
+      setSelectedMeal(null);
+    } catch (error) {
+      console.error("Failed to delete meal", error);
+      alert("Failed to delete meal.");
+    }
+  };
+
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
@@ -555,6 +583,14 @@ const App: React.FC = () => {
           />
         )}
 
+        {selectedMeal && (
+          <MealDetailModal 
+            meal={selectedMeal}
+            onClose={() => setSelectedMeal(null)}
+            onDelete={handleDeleteMeal}
+          />
+        )}
+
         {/* AI Guidance Floating Button */}
         <AIGuidance apiKey={userProfile.apiKey} userProfile={userProfile} dailyLog={log} />
 
@@ -588,9 +624,15 @@ const App: React.FC = () => {
                     setEditingCalories={setEditingCalories} 
                     setIsScanning={setIsScanning}
                     setIsManualAdd={setIsManualAdd}
+                    onMealClick={setSelectedMeal}
                   />
                )}
-               {currentView === 'history' && <HistoryView log={log} />}
+               {currentView === 'history' && (
+                 <HistoryView 
+                   log={log} 
+                   onMealClick={setSelectedMeal}
+                 />
+               )}
                {currentView === 'profile' && <ProfileView profile={userProfile} onUpdateProfile={handleUpdateProfile} />}
             </main>
 
