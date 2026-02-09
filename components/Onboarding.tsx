@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { UserProfile, Gender, ActivityLevel, Goal, DietaryPreference, NutritionTargets } from '../types';
-import { parseAIJson } from '../services/aiHelper';
+import { calculateTargets } from '../services/userService';
+import { Icons } from './Icons';
 
 interface OnboardingProps {
   onComplete: (profile: Omit<UserProfile, 'id'>) => void;
@@ -38,116 +38,22 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   const nextStep = () => setStep(step + 1);
   const prevStep = () => setStep(step - 1);
 
-  // Fallback calculation if AI fails
-  const calculateFallbackTargets = () => {
-    // Mifflin-St Jeor Equation
-    let bmr = (10 * data.weightKg) + (6.25 * data.heightCm) - (5 * data.age);
-    if (data.gender === 'Male') bmr += 5;
-    else bmr -= 161;
-
-    const activityMultipliers: Record<ActivityLevel, number> = {
-      'Sedentary': 1.2,
-      'Light': 1.375,
-      'Moderate': 1.55,
-      'Active': 1.725,
-      'Very Active': 1.9
-    };
-
-    let tdee = bmr * activityMultipliers[data.activityLevel];
-    
-    // Goal Adjustment
-    if (data.goal === 'Lose Weight') tdee -= 500;
-    else if (data.goal === 'Gain Muscle') tdee += 300; 
-
-    const calories = Math.round(tdee);
-    const protein = Math.round((calories * 0.3) / 4);
-    const carbs = Math.round((calories * 0.35) / 4);
-    const fat = Math.round((calories * 0.35) / 9);
-    
-    return {
-      targets: {
-        calories,
-        protein,
-        carbs,
-        fat,
-        fiber: 30,
-        micros: [
-          { name: "Iron", amount: "18mg" },
-          { name: "Calcium", amount: "1000mg" },
-          { name: "Vitamin D", amount: "600IU" }
-        ]
-      },
-      explanation: "Calculated based on standard BMR (Mifflin-St Jeor) and activity multipliers. Adjusted for your specific goal."
-    };
-  };
-
   const generatePlan = async () => {
-    if (!data.apiKey) {
-      setPlanData(calculateFallbackTargets());
-      nextStep();
-      return;
-    }
-
     setIsGenerating(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: data.apiKey });
-      const prompt = `
-        User Profile:
-        - Gender: ${data.gender}
-        - Age: ${data.age}
-        - Weight: ${data.weightKg} kg
-        - Height: ${data.heightCm} cm
-        - Activity: ${data.activityLevel}
-        - Goal: ${data.goal}
-        - Diet: ${data.dietaryPreference}
-        - Medical Conditions: ${data.medicalConditions || "None"}
-        - Specific Notes/Goals: ${data.additionalDetails || "None"}
-
-        Task: Create a personalized nutrition plan.
-        CRITICAL: If the user mentioned specific medical conditions or notes (e.g., "reduce fat", "PCOS", "Diabetic"), you MUST adjust the macros and micros accordingly.
-        
-        Return strictly valid JSON:
-        {
-          "calories": number,
-          "protein": number,
-          "carbs": number,
-          "fat": number,
-          "fiber": number,
-          "micros": [ { "name": "string", "amount": "string with unit" } ],
-          "explanation": "Brief explanation of why you chose these numbers based on their profile and specific notes."
-        }
-      `;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [{ parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" }
-      });
-
-      const result = parseAIJson<any>(response.text || "{}");
-      
-      if (result.calories && result.protein) {
-        setPlanData({
-            targets: {
-                calories: result.calories,
-                protein: result.protein,
-                carbs: result.carbs,
-                fat: result.fat,
-                fiber: result.fiber || 30,
-                micros: result.micros || []
-            },
-            explanation: result.explanation
-        });
-      } else {
-        throw new Error("Invalid AI response");
-      }
-    } catch (e) {
-      console.error("AI Plan Generation Failed", e);
-      setPlanData(calculateFallbackTargets());
-    } finally {
-      setIsGenerating(false);
-      nextStep();
-    }
+    // Simulate thinking time for better UX
+    setTimeout(() => {
+        const result = calculateTargets(
+            data.weightKg, 
+            data.heightCm, 
+            data.age, 
+            data.gender, 
+            data.activityLevel, 
+            data.goal
+        );
+        setPlanData(result);
+        setIsGenerating(false);
+        nextStep();
+    }, 1500);
   };
 
   const handleFinish = () => {
@@ -166,7 +72,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         
         {/* Progress Bar */}
         <div className="flex gap-2 mb-8">
-          {[1, 2, 3, 4, 5].map(i => (
+          {[1, 2, 3, 4, 5, 6].map(i => (
             <div key={i} className={`h-1 flex-1 rounded-full transition-all duration-300 ${i <= step ? 'bg-primary' : 'bg-gray-100'}`} />
           ))}
         </div>
@@ -177,7 +83,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
             <div className="space-y-6">
               <div className="text-center">
                 <h1 className="text-3xl font-black text-gray-900 mb-2">Welcome to NutriTrack</h1>
-                <p className="text-gray-500">Let's set up your personal AI nutrition assistant.</p>
+                <p className="text-gray-500">Let's set up your personal nutrition assistant.</p>
               </div>
 
               <div className="space-y-4">
@@ -191,26 +97,11 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                     placeholder="Your Name"
                   />
                 </div>
-                
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Gemini API Key</label>
-                  <input 
-                    type="password" 
-                    value={data.apiKey}
-                    onChange={(e) => handleChange('apiKey', e.target.value)}
-                    className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-primary/20 outline-none font-mono text-gray-900 text-sm"
-                    placeholder="AIzaSy..."
-                  />
-                  <p className="text-xs text-gray-400 mt-2">
-                    We need this to power the AI features. Your key is stored locally on your device. 
-                    <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-primary hover:underline ml-1">Get a key here.</a>
-                  </p>
-                </div>
               </div>
 
               <button 
                 onClick={nextStep}
-                disabled={!data.name || !data.apiKey}
+                disabled={!data.name}
                 className="w-full py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 disabled:opacity-50 disabled:shadow-none"
               >
                 Next Step
@@ -219,6 +110,49 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
           )}
 
           {step === 2 && (
+            <div className="space-y-6">
+              <div className="text-center">
+                <h1 className="text-2xl font-black text-gray-900 mb-2">Power Up with AI</h1>
+                <p className="text-gray-500 text-sm">To use the camera scanner and chat features, you'll need a free Google Gemini API key.</p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Gemini API Key</label>
+                  <input 
+                    type="password" 
+                    value={data.apiKey}
+                    onChange={(e) => handleChange('apiKey', e.target.value)}
+                    className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-primary/20 outline-none font-mono text-gray-900"
+                    placeholder="AIzaSy..."
+                  />
+                  <div className="mt-2 text-xs text-gray-400 flex flex-col gap-1">
+                    <p>1. Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">Google AI Studio</a></p>
+                    <p>2. Create a free API key</p>
+                    <p>3. Paste it here</p>
+                  </div>
+                </div>
+                
+                <div className="p-3 bg-blue-50 text-blue-700 rounded-xl text-xs flex gap-2">
+                  <div className="mt-0.5"><Icons.Check /></div>
+                  <p>Your key is stored <strong>only on your device</strong>. We never see it.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button onClick={prevStep} className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">Back</button>
+                <button 
+                  onClick={nextStep}
+                  // Allow skip, but maybe warn? For now just let them pass.
+                  className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100"
+                >
+                  {data.apiKey ? "Connect" : "Skip for now"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900">Body Stats</h2>
               
@@ -279,7 +213,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900">Goal & Lifestyle</h2>
               
@@ -322,7 +256,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900">Health & Personalization</h2>
               
@@ -350,7 +284,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                     className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-primary/20 outline-none font-medium text-gray-900 resize-none h-20"
                     placeholder="e.g. Diabetes, PCOD, Lactose Intolerant..."
                   />
-                  <p className="text-xs text-gray-400 mt-1">AI will use this to fine-tune your recommendations.</p>
+                  <p className="text-xs text-gray-400 mt-1">We will adjust targets based on this.</p>
                 </div>
 
                 <div>
@@ -361,7 +295,6 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                     className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-primary/20 outline-none font-medium text-gray-900 resize-none h-28"
                     placeholder="Tell us more about your specific goals...&#10;e.g. 'I want to lose belly fat', 'I work night shifts', 'I hate broccoli'..."
                   />
-                  <p className="text-xs text-gray-400 mt-1">The more details you provide, the better the plan.</p>
                 </div>
               </div>
 
@@ -375,7 +308,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                   {isGenerating ? (
                     <>
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
-                      Generating Plan...
+                      Calculating...
                     </>
                   ) : (
                     "Create Plan"
@@ -385,7 +318,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
             </div>
           )}
 
-          {step === 5 && planData && (
+          {step === 6 && planData && (
             <div className="space-y-6 animate-in fade-in duration-500">
               <h2 className="text-2xl font-bold text-gray-900 text-center">Your Personal Plan</h2>
               
@@ -431,7 +364,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
               <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
                 <div className="flex items-center gap-2 mb-2">
                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-                   <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">AI Reasoning</span>
+                   <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Method</span>
                 </div>
                 <p className="text-sm text-gray-600 leading-relaxed font-medium text-justify">
                   {planData.explanation}

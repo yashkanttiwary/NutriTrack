@@ -2,20 +2,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, DailyLog, ChatMessage } from '../types';
 import { getChatHistory, saveChatMessage } from '../services/db';
-import { createGenAIClient } from '../services/aiHelper';
+import { chatWithAI } from '../services/aiHelper';
+import { useToast } from '../contexts/ToastContext';
 
 interface AIGuidanceProps {
-  apiKey: string;
   userProfile: UserProfile;
   dailyLog: DailyLog;
 }
 
-export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dailyLog }) => {
+export const AIGuidance: React.FC<AIGuidanceProps> = ({ userProfile, dailyLog }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -56,41 +57,19 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
     try {
       await saveChatMessage('user', userMsgText);
 
-      const ai = createGenAIClient(apiKey);
-      
-      const historyContext = messages.slice(-5).map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${m.text}`).join('\n');
-      
-      const context = `
-        System: You are a friendly, knowledgeable nutrition coach for ${userProfile.name}.
+      // Construct context for the AI
+      const contextPrompt = `
+        User Context:
+        Name: ${userProfile.name}
+        Goal: ${userProfile.goal}
+        Targets: ${userProfile.targets.calories}kcal (${userProfile.targets.protein}g P)
+        Today's Log: ${Math.round(dailyLog.totalNutrients.calories)}kcal eaten.
+        Remaining: ${Math.round(userProfile.targets.calories - dailyLog.totalNutrients.calories)}kcal.
         
-        User Profile:
-        - Goal: ${userProfile.goal}
-        - Stats: ${userProfile.age}yo, ${userProfile.heightCm}cm, ${userProfile.weightKg}kg
-        - Diet: ${userProfile.dietaryPreference}
-        - Medical: ${userProfile.medicalConditions || "None"}
-        - Specific Notes/Goals: ${userProfile.additionalDetails || "None"}
-        
-        Plan Targets:
-        - ${dailyLog.targets.calories} kcal
-        - ${dailyLog.targets.protein}g Protein
-        
-        Today's Progress:
-        - ${dailyLog.totalNutrients.calories} kcal consumed
-        
-        Recent History:
-        ${historyContext}
-        
-        User Question: ${userMsgText}
-        
-        Task: Answer as the coach. Be encouraging and brief (2-3 sentences max unless asked for detail).
+        Question: ${userMsgText}
       `;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [{ role: 'user', parts: [{ text: context }] }],
-      });
-
-      const replyText = response.text || "I'm thinking...";
+      const replyText = await chatWithAI(contextPrompt, messages);
       
       await saveChatMessage('model', replyText);
       setMessages(prev => [...prev, { role: 'model', text: replyText, timestamp: Date.now() }]);
@@ -99,10 +78,10 @@ export const AIGuidance: React.FC<AIGuidanceProps> = ({ apiKey, userProfile, dai
       console.error("AI Error:", error);
       let errorMsg = "I'm having trouble connecting.";
       
-      const msg = error.message || error.toString();
-      if (msg.includes("API Key")) errorMsg = "Please check your API Key settings.";
-      else if (msg.includes("403")) errorMsg = "Auth failed. Check API Key.";
-      else if (msg.includes("429")) errorMsg = "I'm getting too many requests. Give me a minute.";
+      if (error.message?.includes("API_KEY")) {
+        errorMsg = "Please connect your API Key in Profile settings first.";
+        showToast("API Key required", "error");
+      }
       
       setMessages(prev => [...prev, { role: 'model', text: errorMsg, timestamp: Date.now() }]);
     } finally {

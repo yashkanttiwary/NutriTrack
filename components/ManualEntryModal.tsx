@@ -1,16 +1,17 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { FoodItem, MealItem } from '../types';
 import { nutritionCalculator } from '../services/NutritionCalculator';
-import { parseAIJson, analyzeImageWithRetry, resizeImage } from '../services/aiHelper';
+import { parseAIJson, analyzeImageWithRetry, resizeImage, analyzeTextPrompt } from '../services/aiHelper';
 import { Icons } from './Icons';
+import { useToast } from '../contexts/ToastContext';
 
 interface ManualEntryModalProps {
   onClose: () => void;
   onAdd: (items: MealItem[]) => void;
-  apiKey: string;
 }
 
-export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onAdd, apiKey }) => {
+export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onAdd }) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FoodItem[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
@@ -18,6 +19,7 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { showToast } = useToast();
 
   // Search logic
   useEffect(() => {
@@ -40,7 +42,7 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
     try {
       const nutrients = nutritionCalculator.calculateNutrients(selectedFood.id, quantity);
       const item: MealItem = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: crypto.randomUUID(),
         foodId: selectedFood.id,
         portionGrams: quantity,
         portionLabel: `${quantity}g ${selectedFood.name}`,
@@ -50,8 +52,7 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
       };
       onAdd([item]);
     } catch (error: any) {
-      alert(error.message || "Failed to calculate nutrients. Please check the quantity.");
-      console.error("Calculation failed:", error);
+      showToast(error.message || "Failed to calculate nutrients", "error");
     }
   };
 
@@ -71,20 +72,10 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
 
     setIsAnalyzing(true);
     try {
-      let imageBase64 = "";
-
-      if (selectedImage) {
-        // High-Fidelity Resize
-        const resizedDataUrl = await resizeImage(selectedImage);
-        imageBase64 = resizedDataUrl.split(',')[1];
-      }
+      let jsonText = "";
       
-      const promptText = `
-        Analyze this meal. Text description: "${query}". 
-        Identify all food items. For each item, estimate the weight in grams and provide nutrition data.
-        
-        Return STRICT JSON array. DO NOT use Markdown formatting. DO NOT wrap in \`\`\`json.
-        
+      const jsonPrompt = `
+        Return STRICT JSON array. DO NOT use Markdown.
         JSON Structure: 
         [
           {
@@ -100,12 +91,32 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
         ]
       `;
 
-      // Use Robust Wrapper
-      const jsonText = await analyzeImageWithRetry(apiKey, imageBase64, promptText);
+      if (selectedImage) {
+        // High-Fidelity Resize
+        const resizedDataUrl = await resizeImage(selectedImage);
+        const imageBase64 = resizedDataUrl.split(',')[1];
+        
+        const promptText = `
+          Analyze this meal. Context: "${query}". 
+          Identify all food items. For each item, estimate the weight in grams and provide nutrition data.
+          ${jsonPrompt}
+        `;
+        jsonText = await analyzeImageWithRetry(imageBase64, promptText);
+      } else {
+        // Text Only Analysis
+        const promptText = `
+          Analyze this food description: "${query}".
+          Identify the food items mentioned. If portions aren't specified, estimate standard serving sizes (e.g. 1 bowl = 150g).
+          Provide nutrition data for Indian context.
+          ${jsonPrompt}
+        `;
+        jsonText = await analyzeTextPrompt(promptText);
+      }
+
       const rawJson = parseAIJson<any[]>(jsonText || "[]");
       
       const items: MealItem[] = rawJson.map((item: any) => ({
-        id: Math.random().toString(36).substr(2, 9),
+        id: crypto.randomUUID(),
         foodId: 'ai_' + Math.random().toString(36).substr(2, 5),
         portionGrams: item.grams,
         portionLabel: `${item.grams}g ${item.name}`,
@@ -125,23 +136,21 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
       if (items.length > 0) {
         onAdd(items);
       } else {
-        alert("AI could not identify any food. Please try again or add more description.");
+        showToast("AI could not identify any food. Try again.", "error");
       }
 
     } catch (error: any) {
       console.error("AI Error:", error);
       const msg = error.message || String(error);
       
-      if (msg.includes("API Key")) {
-         alert("Authentication failed: " + msg);
-      } else if (msg.includes("403")) {
-         alert("Authentication failed. Please check your Gemini API Key in Profile.");
-      } else if (msg.includes("413") || msg.includes("payload")) {
-         alert("Image is too large. The system attempted to resize it but it's still too big. Try a smaller image.");
+      if (msg.includes("API_KEY")) {
+         showToast("Missing API Key. Check Profile settings.", "error");
+      } else if (msg.includes("413")) {
+         showToast("Image too large.", "error");
       } else if (msg.includes("SAFETY")) {
-         alert("AI blocked the analysis due to safety filters. Please try a different image/description.");
+         showToast("Content blocked by AI safety filters.", "error");
       } else {
-         alert(`Failed to analyze meal. Error: ${msg}.`);
+         showToast("Analysis failed. Please try again.", "error");
       }
     } finally {
       setIsAnalyzing(false);

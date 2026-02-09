@@ -58,7 +58,7 @@ export interface NutritionTargets {
 export interface UserProfile {
   id: string; // 'current_user'
   name: string;
-  apiKey: string;
+  apiKey?: string; // Stored locally, used for Gemini API
   gender: Gender;
   age: number;
   heightCm: number;

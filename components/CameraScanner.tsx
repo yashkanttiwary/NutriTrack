@@ -1,15 +1,16 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { nutritionCalculator } from '../services/NutritionCalculator';
 import { MealItem } from '../types';
 import { parseAIJson, analyzeImageWithRetry, resizeImage } from '../services/aiHelper';
+import { useToast } from '../contexts/ToastContext';
 
 interface CameraScannerProps {
   onClose: () => void;
   onResult: (items: MealItem[]) => void;
-  apiKey: string;
 }
 
-export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult, apiKey }) => {
+export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -17,6 +18,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
   const [shutterFlash, setShutterFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const { showToast } = useToast();
 
   const stopCamera = () => {
     if (stream) {
@@ -87,18 +89,32 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       const rawDataUrl = canvas.toDataURL('image/jpeg', 0.9);
       
       // OPTIMIZATION: Use helper to resize safely
-      // Preserves detail for AI while preventing 4MB payload failures
       const optimizedDataUrl = await resizeImage(rawDataUrl);
       const base64Image = optimizedDataUrl.split(',')[1];
 
-      // Robust Prompt (Shortened for token efficiency)
+      // Robust Prompt
       const prompt = `
-        Identify foods, portion grams, and nutrition (cal,prot,carb,fat,fib).
-        Return JSON array: [{"name":str,"grams":num,"calories":num,"protein":num,"carbs":num,"fat":num,"fiber":num,"micros":[str]}]
+        Identify the food items in this image.
+        For each item, estimate the portion size in grams based on visual cues (plate size etc).
+        
+        Return a strict JSON array with this schema:
+        [
+          {
+            "name": "Food Name",
+            "grams": 150,
+            "calories": 200,
+            "protein": 10,
+            "carbs": 30,
+            "fat": 5,
+            "fiber": 2,
+            "micros": ["Vitamin A", "Iron"] 
+          }
+        ]
+        
+        If unsure about nutrition, estimate using standard values for indian cuisine.
       `;
 
-      // Use Robust Wrapper (Backoff + Caching)
-      const jsonText = await analyzeImageWithRetry(apiKey, base64Image, prompt);
+      const jsonText = await analyzeImageWithRetry(base64Image, prompt);
       const rawJson = parseAIJson<any[]>(jsonText || "[]");
       const detectedItems: MealItem[] = [];
 
@@ -110,7 +126,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
 
         const grams = cleanNum(item.grams) || 100;
         
-        // Search Local DB
+        // Search Local DB for better matches, fallback to AI
         const matches = nutritionCalculator.searchFoods(item.name);
         
         if (matches.length > 0) {
@@ -118,7 +134,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
           const nutrients = nutritionCalculator.calculateNutrients(food.id, grams);
           
           detectedItems.push({
-            id: Math.random().toString(36).substr(2, 9),
+            id: crypto.randomUUID(),
             foodId: food.id,
             portionGrams: grams,
             portionLabel: `${grams}g ${food.name}`,
@@ -129,7 +145,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
         } else {
           // Use AI Data
           detectedItems.push({
-            id: Math.random().toString(36).substr(2, 9),
+            id: crypto.randomUUID(),
             foodId: 'ai_' + Math.random().toString(36).substr(2, 6),
             portionGrams: grams,
             portionLabel: `${grams}g ${item.name}`,
@@ -160,9 +176,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onClose, onResult,
       let msg = "Analysis failed. Please try again.";
       const eStr = err.message || err.toString();
       
-      if (eStr.includes("API Key")) msg = "Check API Key in Profile.";
-      else if (eStr.includes("403")) msg = "Auth failed. Check API Key.";
-      else if (eStr.includes("404")) msg = "AI Model unavailable.";
+      if (eStr.includes("API_KEY")) {
+        msg = "API Key Invalid or Missing. Please check settings.";
+        showToast("Please add your Gemini API Key in Profile settings", "error");
+      }
       else if (eStr.includes("429")) msg = "AI is busy. Please try again in 10s.";
       else if (eStr.includes("timed out")) msg = "Network too slow. Try again.";
       else if (eStr.includes("SAFETY")) msg = "Image blocked by safety filters.";

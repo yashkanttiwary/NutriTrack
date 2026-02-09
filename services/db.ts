@@ -1,7 +1,9 @@
+
 import Dexie, { type Table } from 'dexie';
 import { Meal, DailyLog, Nutrients, UserProfile, ChatMessage } from '../types';
+import { getLocalISOString } from '../utils/dateUtils';
+import { safeAdd } from '../utils/formatUtils';
 
-// Define the database class extending Dexie to leverage built-in methods
 class NutritionDatabase extends Dexie {
   meals!: Table<Meal>;
   dailyLogs!: Table<DailyLog>;
@@ -11,29 +13,17 @@ class NutritionDatabase extends Dexie {
 
   constructor() {
     super('NutriTrackDB');
-    
-    // Define schema
     (this as any).version(5).stores({
       meals: 'id, timestamp, mealType', 
       dailyLogs: 'date',
       userProfile: 'id',
       chatMessages: '++id, timestamp',
-      apiCache: 'hash, timestamp' // New table for API idempotency
+      apiCache: 'hash, timestamp'
     });
   }
 }
 
-// Create a single instance of the database
 export const db = new NutritionDatabase();
-
-// --- Date Helper (HIGH-001 Fix) ---
-// Generates YYYY-MM-DD based on LOCAL time, not UTC
-function getLocalDayKey(date: Date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 // --- User Profile Helpers ---
 
@@ -50,11 +40,7 @@ export async function saveUserProfile(profile: Omit<UserProfile, 'id'>) {
 // --- Chat Helpers ---
 
 export async function saveChatMessage(role: 'user' | 'model', text: string) {
-  await db.chatMessages.add({
-    role,
-    text,
-    timestamp: Date.now()
-  });
+  await db.chatMessages.add({ role, text, timestamp: Date.now() });
 }
 
 export async function getChatHistory(): Promise<ChatMessage[]> {
@@ -63,68 +49,74 @@ export async function getChatHistory(): Promise<ChatMessage[]> {
 
 // --- Meal Helpers ---
 
-// Helper to save a meal with transaction support for atomicity
 export async function saveMeal(meal: Meal) {
-  // Use the transaction method from the Dexie instance
-  // CRITICAL FIX: Include db.userProfile because updateDailyLog calls getUserProfile()
-  return await (db as any).transaction('rw', [db.meals, db.dailyLogs, db.userProfile], async () => {
+  // Use ISO string for consistency
+  const dateStr = getLocalISOString(meal.timestamp);
+  
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     await db.meals.add(meal);
-    await updateDailyLog(meal.timestamp);
+    
+    // OPTIMIZATION (F-005): Incremental update instead of full recalculation
+    const log = await db.dailyLogs.get(dateStr);
+    
+    if (log) {
+      // Add new meal nutrients to existing total
+      const newTotal = sumNutrients(log.totalNutrients, meal.totalNutrients);
+      log.meals.push(meal);
+      log.totalNutrients = newTotal;
+      await db.dailyLogs.put(log);
+    } else {
+      // Create new log if not exists
+      const profile = await db.userProfile.get('current_user');
+      const targets = profile?.targets || createDefaultTargets();
+      
+      await db.dailyLogs.put({
+        date: dateStr,
+        meals: [meal],
+        totalNutrients: meal.totalNutrients,
+        targets: targets
+      });
+    }
   });
 }
 
-// Helper to delete a meal and update the daily log
 export async function deleteMeal(id: string) {
-  // Use the transaction method from the Dexie instance
-  // CRITICAL FIX: Include db.userProfile because updateDailyLog calls getUserProfile()
-  return await (db as any).transaction('rw', [db.meals, db.dailyLogs, db.userProfile], async () => {
+  return await (db as any).transaction('rw', [db.meals, db.dailyLogs], async () => {
     const meal = await db.meals.get(id);
     if (!meal) return;
     
+    const dateStr = getLocalISOString(meal.timestamp);
     await db.meals.delete(id);
-    await updateDailyLog(meal.timestamp);
+    
+    // Recalculate is safer for delete to handle potential edge cases or just subtract
+    await recalculateDailyLog(meal.timestamp);
   });
 }
 
-// Fetch today's log or return a default empty structure
 export async function getTodayLog(): Promise<DailyLog> {
-  const dateStr = getLocalDayKey(); // Fixed: Use local date
+  const dateStr = getLocalISOString();
   const log = await db.dailyLogs.get(dateStr);
   
   if (log) return log;
 
-  // If no log exists for today, try to get targets from user profile
   const profile = await getUserProfile();
-  
-  const defaultTargets = profile?.targets || {
-    calories: 2000,
-    protein: 80,
-    carbs: 250,
-    fat: 60,
-    fiber: 30,
-    micros: []
-  };
+  const targets = profile?.targets || createDefaultTargets();
 
-  // Return default if not exists (don't save yet to avoid empty DB writes until action)
   return {
     date: dateStr,
     meals: [],
     totalNutrients: createZeroNutrients(),
-    targets: defaultTargets
+    targets: targets
   };
 }
 
-// Update targets for specific date
 export async function updateDailyTargets(targets: DailyLog['targets']) {
-  const dateStr = getLocalDayKey(); // Fixed: Use local date
-  
-  // Use the transaction method from the Dexie instance
+  const dateStr = getLocalISOString();
   await (db as any).transaction('rw', [db.dailyLogs], async () => {
     const log = await db.dailyLogs.get(dateStr);
     if (log) {
       await db.dailyLogs.update(dateStr, { targets });
     } else {
-      // Create new log if updating targets before adding meals
       await db.dailyLogs.put({
         date: dateStr,
         meals: [],
@@ -135,15 +127,12 @@ export async function updateDailyTargets(targets: DailyLog['targets']) {
   });
 }
 
-// Re-calculates daily log from scratch to prevent rounding drift
-async function updateDailyLog(date: Date) {
-  const dateStr = getLocalDayKey(date); // Fixed: Use local date of the meal
+// Fallback full recalculation
+async function recalculateDailyLog(date: Date) {
+  const dateStr = getLocalISOString(date);
   
-  // Find all meals for this day
-  // Construct local start/end times carefully
   const dayStart = new Date(date);
   dayStart.setHours(0,0,0,0);
-  
   const dayEnd = new Date(date);
   dayEnd.setHours(23,59,59,999);
   
@@ -152,30 +141,10 @@ async function updateDailyLog(date: Date) {
     .between(dayStart, dayEnd)
     .toArray();
     
-  // Get existing targets to preserve them
   const existingLog = await db.dailyLogs.get(dateStr);
   const profile = await getUserProfile();
-  
-  const targets = existingLog?.targets || profile?.targets || {
-    calories: 2000,
-    protein: 80,
-    carbs: 250,
-    fat: 60,
-    fiber: 30,
-    micros: []
-  };
+  const targets = existingLog?.targets || profile?.targets || createDefaultTargets();
 
-  if (meals.length === 0) {
-    await db.dailyLogs.put({
-      date: dateStr,
-      meals: [],
-      totalNutrients: createZeroNutrients(),
-      targets: targets
-    });
-    return;
-  }
-  
-  // Recalculate totals from scratch
   const totalNutrients = meals.reduce((acc, meal) => {
     return sumNutrients(acc, meal.totalNutrients);
   }, createZeroNutrients());
@@ -186,6 +155,17 @@ async function updateDailyLog(date: Date) {
     totalNutrients: totalNutrients,
     targets: targets
   });
+}
+
+function createDefaultTargets() {
+  return {
+    calories: 2000,
+    protein: 80,
+    carbs: 250,
+    fat: 60,
+    fiber: 30,
+    micros: []
+  };
 }
 
 function createZeroNutrients(): Nutrients {
@@ -201,23 +181,21 @@ function createZeroNutrients(): Nutrients {
 }
 
 function sumNutrients(a: Nutrients, b: Nutrients): Nutrients {
-  // Aggregate micros: combine arrays and deduplicate simple strings
   const combinedMicros = [...(a.micros || []), ...(b.micros || [])];
   const uniqueMicros = Array.from(new Set(combinedMicros));
 
   return {
     calories: Math.round(a.calories + b.calories),
-    // Fix floating point precision issues (e.g. 0.1 + 0.2 = 0.300000004)
-    protein: parseFloat((a.protein + b.protein).toFixed(1)),
-    carbs: parseFloat((a.carbs + b.carbs).toFixed(1)),
-    fat: parseFloat((a.fat + b.fat).toFixed(1)),
-    fiber: parseFloat((a.fiber + b.fiber).toFixed(1)),
+    protein: safeAdd(a.protein, b.protein),
+    carbs: safeAdd(a.carbs, b.carbs),
+    fat: safeAdd(a.fat, b.fat),
+    fiber: safeAdd(a.fiber, b.fiber),
     sourceDatabase: a.sourceDatabase,
     micros: uniqueMicros
   };
 }
 
-// --- Import/Export Helpers (HIGH-002) ---
+// --- Import/Export Helpers ---
 
 export async function exportUserData(): Promise<Blob> {
   const profile = await db.userProfile.toArray();
@@ -225,10 +203,16 @@ export async function exportUserData(): Promise<Blob> {
   const meals = await db.meals.toArray();
   const chat = await db.chatMessages.toArray();
   
+  // SECURITY: Remove API keys from export
+  const safeProfile = profile.map(p => {
+    const { apiKey, ...rest } = p;
+    return rest;
+  });
+
   const data = JSON.stringify({
     version: 1,
     timestamp: Date.now(),
-    data: { profile, logs, meals, chat }
+    data: { profile: safeProfile, logs, meals, chat }
   }, null, 2);
   
   return new Blob([data], { type: 'application/json' });
@@ -239,14 +223,31 @@ export async function importUserData(jsonString: string): Promise<boolean> {
     const backup = JSON.parse(jsonString);
     if (!backup.data) throw new Error("Invalid backup format");
     
-    // Clear existing data and import new data transactionally
+    // SECURITY: Don't import API keys if they somehow exist in the backup (unlikely with our export, but good defense)
+    if (backup.data.profile) {
+      backup.data.profile = backup.data.profile.map((p: any) => {
+        const { apiKey, ...rest } = p;
+        return rest;
+      });
+    }
+
     await (db as any).transaction('rw', [db.userProfile, db.dailyLogs, db.meals, db.chatMessages], async () => {
+      // Preserve existing API key if it exists
+      const existingProfile = await db.userProfile.get('current_user');
+      const existingKey = existingProfile?.apiKey;
+
       await db.userProfile.clear();
       await db.dailyLogs.clear();
       await db.meals.clear();
       await db.chatMessages.clear();
       
-      if (backup.data.profile?.length) await db.userProfile.bulkAdd(backup.data.profile);
+      if (backup.data.profile?.length) {
+        // Restore key to the imported profile if found
+        const importedProfile = backup.data.profile[0];
+        if (existingKey) importedProfile.apiKey = existingKey;
+        await db.userProfile.put(importedProfile);
+      }
+      
       if (backup.data.logs?.length) await db.dailyLogs.bulkAdd(backup.data.logs);
       if (backup.data.meals?.length) await db.meals.bulkAdd(backup.data.meals);
       if (backup.data.chat?.length) await db.chatMessages.bulkAdd(backup.data.chat);
