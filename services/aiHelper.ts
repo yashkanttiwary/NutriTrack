@@ -31,7 +31,15 @@ export const parseAIJson = <T>(text: string): T => {
   }
 };
 
-export const resizeImage = async (dataUrl: string, maxSize = 800, quality = 0.7): Promise<string> => {
+/**
+ * Resizes an image to specific dimensions and quality to optimize bandwidth.
+ * Uses createImageBitmap for off-thread processing where available.
+ * 
+ * @param dataUrl - The source image as data URL
+ * @param maxSize - Max width/height (default 800px for balance of speed/quality)
+ * @param quality - JPEG quality 0-1 (default 0.6 for high compression)
+ */
+export const resizeImage = async (dataUrl: string, maxSize = 800, quality = 0.6): Promise<string> => {
   const res = await fetch(dataUrl);
   const blob = await res.blob();
   const bitmap = await createImageBitmap(blob);
@@ -81,8 +89,9 @@ export const analyzeImageWithRetry = async (
   const ai = await getClient();
   
   try {
+    // Using gemini-3-flash-preview as it supports multimodal inputs (text + image) reliably
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image', // Optimized for vision
+      model: 'gemini-3-flash-preview', 
       contents: {
         parts: [
           {
@@ -97,6 +106,7 @@ export const analyzeImageWithRetry = async (
       config: {
         temperature: 0.2, // Low temp for factual data
         maxOutputTokens: 1000,
+        responseMimeType: 'application/json', // Enforce JSON for robust parsing
       }
     });
 
@@ -121,6 +131,7 @@ export const analyzeTextPrompt = async (prompt: string): Promise<string> => {
       contents: prompt,
       config: {
         temperature: 0.3,
+        responseMimeType: 'application/json', // Enforce JSON
       }
     });
 

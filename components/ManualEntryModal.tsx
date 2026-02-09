@@ -5,6 +5,7 @@ import { nutritionCalculator } from '../services/NutritionCalculator';
 import { parseAIJson, analyzeImageWithRetry, resizeImage, analyzeTextPrompt } from '../services/aiHelper';
 import { Icons } from './Icons';
 import { useToast } from '../contexts/ToastContext';
+import { useUser } from '../contexts/UserContext';
 
 interface ManualEntryModalProps {
   onClose: () => void;
@@ -18,8 +19,11 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
   const [quantity, setQuantity] = useState(100); // grams
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
+  const { userProfile } = useUser();
 
   // Search logic
   useEffect(() => {
@@ -59,6 +63,9 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Allow re-selecting the same file if needed by resetting value
+      e.target.value = '';
+      
       const reader = new FileReader();
       reader.onloadend = () => {
         setSelectedImage(reader.result as string);
@@ -69,6 +76,11 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
 
   const analyzeWithAI = async () => {
     if ((!query && !selectedImage) || isAnalyzing) return;
+
+    if (!userProfile?.apiKey) {
+      showToast("API Key Missing. Check Profile.", "error");
+      return;
+    }
 
     setIsAnalyzing(true);
     try {
@@ -92,8 +104,8 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
       `;
 
       if (selectedImage) {
-        // High-Fidelity Resize
-        const resizedDataUrl = await resizeImage(selectedImage);
+        // High-Fidelity Resize with moderate compression to save bandwidth/tokens
+        const resizedDataUrl = await resizeImage(selectedImage, 800, 0.6);
         const imageBase64 = resizedDataUrl.split(',')[1];
         
         const promptText = `
@@ -177,7 +189,7 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
         )}
 
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Log Meal</h3>
+          <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Add Meal</h3>
           <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
         </div>
 
@@ -207,9 +219,28 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
 
               <div className="flex justify-between items-center mt-2">
                 <div className="flex gap-2">
+                  {/* Camera Button - Native Capture */}
+                  <button 
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="p-2 text-primary bg-white rounded-xl shadow-sm border border-gray-100 hover:bg-green-50 transition-colors"
+                    title="Take Photo"
+                  >
+                    <Icons.Camera />
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={cameraInputRef} 
+                    className="hidden" 
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleImageSelect}
+                  />
+
+                  {/* Gallery Button */}
                   <button 
                     onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-primary bg-white rounded-xl shadow-sm border border-gray-100 hover:bg-green-50 transition-colors"
+                    className="p-2 text-gray-500 bg-white rounded-xl shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors"
+                    title="Upload Image"
                   >
                     <Icons.Image />
                   </button>

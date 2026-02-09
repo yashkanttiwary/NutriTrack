@@ -6,7 +6,6 @@ import { Icons } from '../components/Icons';
 import { MacroDisplay } from '../components/ui/MacroDisplay';
 import { APP_CONFIG } from '../constants';
 import { MacroEditor } from '../components/MacroEditor';
-import { CameraScanner } from '../components/CameraScanner';
 import { ManualEntryModal } from '../components/ManualEntryModal';
 import { ResultSummary } from '../components/ResultSummary';
 import { saveMeal, updateDailyTargets } from '../services/db';
@@ -17,7 +16,6 @@ export const HomeView = ({ onMealClick }: { onMealClick: (meal: Meal) => void })
   const { showToast } = useToast();
   
   const [editingCalories, setEditingCalories] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
   const [isManualAdd, setIsManualAdd] = useState(false);
   const [detectedItems, setDetectedItems] = useState<MealItem[] | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -29,7 +27,7 @@ export const HomeView = ({ onMealClick }: { onMealClick: (meal: Meal) => void })
   const handleUpdateTargets = async (t: any) => {
     await updateDailyTargets(t);
     await refreshLog();
-    await refreshProfile(); // Profile keeps a copy of targets
+    await refreshProfile(); 
     showToast("Targets updated", "success");
   };
 
@@ -43,7 +41,7 @@ export const HomeView = ({ onMealClick }: { onMealClick: (meal: Meal) => void })
         });
 
         const meal: Meal = {
-          id: crypto.randomUUID(), // IDEMPOTENCY FIX (F-016)
+          id: crypto.randomUUID(),
           timestamp: new Date(),
           items: detectedItems,
           totalNutrients: {
@@ -135,27 +133,19 @@ export const HomeView = ({ onMealClick }: { onMealClick: (meal: Meal) => void })
         {/* Right Side: Actions & Logs */}
         <section className="space-y-5 sm:space-y-8">
           
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
-            <button 
-              onClick={() => setIsScanning(true)}
-              aria-label="Scan Meal with Camera"
-              className="flex flex-col items-center justify-center gap-3 sm:gap-4 bg-primary text-white p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] font-bold shadow-lg shadow-green-100 hover:shadow-xl hover:bg-green-600 active:scale-95 transition-all group"
-            >
-              <div className="p-3 sm:p-4 bg-white/20 rounded-2xl group-hover:scale-110 transition-transform">
-                <Icons.Camera />
-              </div>
-              <span className="text-xs sm:text-sm tracking-wide">Scan Meal</span>
-            </button>
-
+          <div className="w-full">
             <button 
               onClick={() => setIsManualAdd(true)}
-              aria-label="Add Meal Manually"
-              className="flex flex-col items-center justify-center gap-3 sm:gap-4 bg-white text-gray-800 p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-lg hover:border-primary/20 active:scale-95 transition-all group"
+              aria-label="Add Meal"
+              className="w-full flex items-center justify-center gap-4 bg-primary text-white p-5 sm:p-6 rounded-[2rem] sm:rounded-[2.5rem] font-bold shadow-lg shadow-green-100 hover:shadow-xl hover:bg-green-600 active:scale-95 transition-all group"
             >
-              <div className="p-3 sm:p-4 bg-gray-50 text-primary rounded-2xl group-hover:scale-110 transition-transform">
+              <div className="p-3 bg-white/20 rounded-2xl group-hover:scale-110 transition-transform">
                 <Icons.Plus />
               </div>
-              <span className="text-xs sm:text-sm tracking-wide">Manual Add</span>
+              <div className="text-left">
+                <span className="block text-lg tracking-wide">Add Meal</span>
+                <span className="text-[10px] sm:text-xs font-medium opacity-80 uppercase tracking-widest">Camera • Text • Search</span>
+              </div>
             </button>
           </div>
 
@@ -171,7 +161,7 @@ export const HomeView = ({ onMealClick }: { onMealClick: (meal: Meal) => void })
                   <Icons.Book />
                 </div>
                 <p className="text-gray-400 text-xs sm:text-sm font-medium">No meals logged yet today.</p>
-                <p className="text-gray-300 text-[10px] sm:text-xs mt-1">Use the camera to track your first meal.</p>
+                <p className="text-gray-300 text-[10px] sm:text-xs mt-1">Tap 'Add Meal' to get started.</p>
               </div>
             ) : (
               <div className="space-y-3 sm:space-y-4">
@@ -207,13 +197,6 @@ export const HomeView = ({ onMealClick }: { onMealClick: (meal: Meal) => void })
             current={dailyLog.targets} 
             onSave={handleUpdateTargets} 
             onClose={() => setEditingCalories(false)} 
-          />
-      )}
-
-      {isScanning && (
-          <CameraScanner 
-            onClose={() => setIsScanning(false)} 
-            onResult={(items) => { setIsScanning(false); setDetectedItems(items); }}
           />
       )}
 
