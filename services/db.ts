@@ -85,10 +85,10 @@ export async function deleteMeal(id: string) {
     const meal = await db.meals.get(id);
     if (!meal) return;
     
-    const dateStr = getLocalISOString(meal.timestamp);
     await db.meals.delete(id);
     
     // Recalculate is safer for delete to handle potential edge cases or just subtract
+    // We will do a full recalc here to be safe as deletes are rare
     await recalculateDailyLog(meal.timestamp);
   });
 }

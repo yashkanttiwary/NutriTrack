@@ -6,7 +6,7 @@ import { exportUserData, importUserData, saveUserProfile } from '../services/db'
 import { Icons } from '../components/Icons';
 
 export const ProfileView = () => {
-  const { userProfile, setUserProfile, refreshLog } = useUser();
+  const { userProfile, setUserProfile } = useUser();
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [apiKey, setApiKey] = useState(userProfile?.apiKey || '');

@@ -1,5 +1,4 @@
 
-import React from 'react';
 import { useUser } from '../contexts/UserContext';
 import { Meal } from '../types';
 import { formatTime } from '../utils/dateUtils';
