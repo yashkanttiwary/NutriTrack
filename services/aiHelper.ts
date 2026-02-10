@@ -128,13 +128,15 @@ export const chatWithAI = async (
   
   const chat = ai.chats.create({
     model: 'gemini-3-flash-preview',
+    history: history.map(h => ({
+      role: h.role,
+      parts: [{ text: h.text }]
+    })),
     config: {
       systemInstruction: "You are NutriTrack, an expert Indian food nutritionist. Keep responses under 80 words. Be encouraging and provide actionable tips.",
     }
   });
 
-  // Simple sequential message sending for history (SDK handles history internally better in some versions)
-  // but for reliability we send the current context
   const result = await chat.sendMessage({ message });
   return result.text || "I'm sorry, I couldn't process that.";
 };

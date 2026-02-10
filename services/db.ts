@@ -203,16 +203,11 @@ export async function exportUserData(): Promise<Blob> {
   const meals = await db.meals.toArray();
   const chat = await db.chatMessages.toArray();
   
-  // SECURITY: Remove API keys from export
-  const safeProfile = profile.map(p => {
-    const { apiKey, ...rest } = p;
-    return rest;
-  });
-
+  // profile no longer contains apiKey, so we just export as is
   const data = JSON.stringify({
     version: 1,
     timestamp: Date.now(),
-    data: { profile: safeProfile, logs, meals, chat }
+    data: { profile, logs, meals, chat }
   }, null, 2);
   
   return new Blob([data], { type: 'application/json' });
@@ -222,32 +217,14 @@ export async function importUserData(jsonString: string): Promise<boolean> {
   try {
     const backup = JSON.parse(jsonString);
     if (!backup.data) throw new Error("Invalid backup format");
-    
-    // SECURITY: Don't import API keys if they somehow exist in the backup (unlikely with our export, but good defense)
-    if (backup.data.profile) {
-      backup.data.profile = backup.data.profile.map((p: any) => {
-        const { apiKey, ...rest } = p;
-        return rest;
-      });
-    }
 
     await (db as any).transaction('rw', [db.userProfile, db.dailyLogs, db.meals, db.chatMessages], async () => {
-      // Preserve existing API key if it exists
-      const existingProfile = await db.userProfile.get('current_user');
-      const existingKey = existingProfile?.apiKey;
-
       await db.userProfile.clear();
       await db.dailyLogs.clear();
       await db.meals.clear();
       await db.chatMessages.clear();
       
-      if (backup.data.profile?.length) {
-        // Restore key to the imported profile if found
-        const importedProfile = backup.data.profile[0];
-        if (existingKey) importedProfile.apiKey = existingKey;
-        await db.userProfile.put(importedProfile);
-      }
-      
+      if (backup.data.profile?.length) await db.userProfile.bulkAdd(backup.data.profile);
       if (backup.data.logs?.length) await db.dailyLogs.bulkAdd(backup.data.logs);
       if (backup.data.meals?.length) await db.meals.bulkAdd(backup.data.meals);
       if (backup.data.chat?.length) await db.chatMessages.bulkAdd(backup.data.chat);

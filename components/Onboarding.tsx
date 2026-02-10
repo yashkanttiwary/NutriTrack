@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import { UserProfile, Gender, ActivityLevel, Goal, DietaryPreference, NutritionTargets } from '../types';
 import { calculateTargets } from '../services/userService';
-import { Icons } from './Icons';
 
 interface OnboardingProps {
   onComplete: (profile: Omit<UserProfile, 'id'>) => void;
