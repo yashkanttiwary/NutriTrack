@@ -165,7 +165,7 @@ export const HomeView = ({ onMealClick }: { onMealClick: (meal: Meal) => void })
               </div>
             ) : (
               <div className="space-y-3 sm:space-y-4">
-                {dailyLog.meals.slice().reverse().map(meal => (
+                {dailyLog.meals.slice().reverse().map((meal: Meal) => (
                   <div 
                     key={meal.id} 
                     onClick={() => onMealClick(meal)}
