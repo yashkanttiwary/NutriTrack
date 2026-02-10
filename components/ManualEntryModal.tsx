@@ -5,7 +5,6 @@ import { nutritionCalculator } from '../services/NutritionCalculator';
 import { parseAIJson, analyzeImageWithRetry, resizeImage, analyzeTextPrompt } from '../services/aiHelper';
 import { Icons } from './Icons';
 import { useToast } from '../contexts/ToastContext';
-import { useUser } from '../contexts/UserContext';
 
 interface ManualEntryModalProps {
   onClose: () => void;
@@ -16,16 +15,14 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FoodItem[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
-  const [quantity, setQuantity] = useState(100); // grams
+  const [quantity, setQuantity] = useState(100);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
-  const { userProfile } = useUser();
 
-  // Search logic
   useEffect(() => {
     if (query.trim().length > 1 && !selectedImage && !isAnalyzing) {
       setResults(nutritionCalculator.searchFoods(query));
@@ -42,19 +39,17 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
 
   const handleLocalAdd = () => {
     if (!selectedFood) return;
-    
     try {
       const nutrients = nutritionCalculator.calculateNutrients(selectedFood.id, quantity);
-      const item: MealItem = {
+      onAdd([{
         id: crypto.randomUUID(),
         foodId: selectedFood.id,
         portionGrams: quantity,
         portionLabel: `${quantity}g ${selectedFood.name}`,
-        nutrients: nutrients,
+        nutrients,
         confidence: "high",
         manuallyAdded: true
-      };
-      onAdd([item]);
+      }]);
     } catch (error: any) {
       showToast(error.message || "Failed to calculate nutrients", "error");
     }
@@ -63,12 +58,15 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Allow re-selecting the same file if needed by resetting value
       e.target.value = '';
-      
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result as string);
+      reader.onloadend = async () => {
+        try {
+          const optimized = await resizeImage(reader.result as string, 1024);
+          setSelectedImage(optimized);
+        } catch (err) {
+          showToast("Image processing failed.", "error");
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -76,68 +74,30 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
 
   const analyzeWithAI = async () => {
     if ((!query && !selectedImage) || isAnalyzing) return;
-
-    if (!userProfile?.apiKey) {
-      showToast("API Key Missing. Check Profile.", "error");
-      return;
-    }
-
     setIsAnalyzing(true);
     try {
       let jsonText = "";
-      
-      const jsonPrompt = `
-        Return STRICT JSON array. DO NOT use Markdown.
-        JSON Structure: 
-        [
-          {
-            "name": "string", 
-            "grams": number, 
-            "calories": number, 
-            "protein": number, 
-            "carbs": number, 
-            "fat": number, 
-            "fiber": number,
-            "micros": ["string"]
-          }
-        ]
-      `;
+      const jsonPrompt = `Identify food items. Return strictly JSON array: [{"name": string, "grams": number, "calories": number, "protein": number, "carbs": number, "fat": number, "fiber": number, "micros": string[]}].`;
 
       if (selectedImage) {
-        // High-Fidelity Resize with moderate compression to save bandwidth/tokens
-        const resizedDataUrl = await resizeImage(selectedImage, 800, 0.6);
-        const imageBase64 = resizedDataUrl.split(',')[1];
-        
-        const promptText = `
-          Analyze this meal. Context: "${query}". 
-          Identify all food items. For each item, estimate the weight in grams and provide nutrition data.
-          ${jsonPrompt}
-        `;
-        jsonText = await analyzeImageWithRetry(imageBase64, promptText);
+        const imageBase64 = selectedImage.split(',')[1];
+        jsonText = await analyzeImageWithRetry(imageBase64, `Identify this meal. Context: ${query}. ${jsonPrompt}`);
       } else {
-        // Text Only Analysis
-        const promptText = `
-          Analyze this food description: "${query}".
-          Identify the food items mentioned. If portions aren't specified, estimate standard serving sizes (e.g. 1 bowl = 150g).
-          Provide nutrition data for Indian context.
-          ${jsonPrompt}
-        `;
-        jsonText = await analyzeTextPrompt(promptText);
+        jsonText = await analyzeTextPrompt(`Analyze: ${query}. ${jsonPrompt}`);
       }
 
-      const rawJson = parseAIJson<any[]>(jsonText || "[]");
-      
+      const rawJson = parseAIJson<any[]>(jsonText);
       const items: MealItem[] = rawJson.map((item: any) => ({
         id: crypto.randomUUID(),
         foodId: 'ai_' + Math.random().toString(36).substr(2, 5),
-        portionGrams: item.grams,
-        portionLabel: `${item.grams}g ${item.name}`,
+        portionGrams: item.grams || 100,
+        portionLabel: `${item.grams || 100}g ${item.name}`,
         nutrients: {
-          calories: item.calories,
-          protein: item.protein,
-          carbs: item.carbs,
-          fat: item.fat,
-          fiber: item.fiber,
+          calories: item.calories || 0,
+          protein: item.protein || 0,
+          carbs: item.carbs || 0,
+          fat: item.fat || 0,
+          fiber: item.fiber || 0,
           micros: item.micros || [],
           sourceDatabase: "AI"
         },
@@ -145,199 +105,72 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ onClose, onA
         manuallyAdded: true
       }));
 
-      if (items.length > 0) {
-        onAdd(items);
-      } else {
-        showToast("AI could not identify any food. Try again.", "error");
-      }
-
+      if (items.length > 0) onAdd(items);
+      else throw new Error("No food found.");
     } catch (error: any) {
-      console.error("AI Error:", error);
-      const msg = error.message || String(error);
-      
-      if (msg.includes("API_KEY")) {
-         showToast("Missing API Key. Check Profile settings.", "error");
-      } else if (msg.includes("413")) {
-         showToast("Image too large.", "error");
-      } else if (msg.includes("SAFETY")) {
-         showToast("Content blocked by AI safety filters.", "error");
-      } else {
-         showToast("Analysis failed. Please try again.", "error");
-      }
+      console.error("Analysis Error:", error);
+      showToast("Analysis failed. Try a clearer description or photo.", "error");
     } finally {
       setIsAnalyzing(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-lg md:rounded-[2.5rem] rounded-t-[2.5rem] p-6 shadow-2xl h-[90vh] md:h-auto md:max-h-[85vh] flex flex-col relative overflow-hidden transition-all">
-        
-        {/* Loading Overlay */}
+    <div className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+      <div className="bg-white w-full max-w-lg rounded-[2rem] p-6 shadow-2xl flex flex-col relative overflow-hidden">
         {isAnalyzing && (
-          <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in">
-             <div className="w-20 h-20 relative mb-6">
-                <div className="absolute inset-0 border-4 border-gray-100 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                <div className="absolute inset-4 bg-primary/10 rounded-full flex items-center justify-center animate-pulse">
-                   <Icons.Search />
-                </div>
-             </div>
-             <h3 className="text-xl font-bold text-gray-900 mb-2">Analyzing Meal...</h3>
-             <p className="text-gray-500 text-sm">Identifying foods & calculating nutrients</p>
+          <div className="absolute inset-0 z-50 bg-white/90 flex flex-col items-center justify-center">
+             <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
+             <p className="font-bold text-gray-900">Identifying food...</p>
           </div>
         )}
 
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Add Meal</h3>
-          <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><Icons.X /></button>
+          <h3 className="text-xl font-bold">Add Meal</h3>
+          <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500"><Icons.X /></button>
         </div>
 
         {!selectedFood ? (
           <>
-            {/* Smart Input Section */}
-            <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100 mb-4 sm:mb-6 transition-all focus-within:border-primary/30 focus-within:ring-4 focus-within:ring-primary/5 shrink-0">
+            <div className="bg-gray-50 p-4 rounded-3xl mb-4">
               <textarea
-                placeholder="Describe your meal (e.g. '2 idli with sambar') or search database..."
-                className="w-full bg-transparent border-none focus:ring-0 text-gray-800 placeholder-gray-400 resize-none h-20 text-base sm:text-lg leading-relaxed"
+                placeholder="Describe your meal (e.g. '2 idli with sambar')"
+                className="w-full bg-transparent border-none focus:ring-0 text-gray-800 h-20"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                autoFocus
               />
-              
-              {selectedImage && (
-                <div className="relative mt-2 mb-4 w-16 h-16 sm:w-20 sm:h-20">
-                  <img src={selectedImage} alt="Preview" className="w-full h-full object-cover rounded-xl border border-gray-200" />
-                  <button 
-                    onClick={() => setSelectedImage(null)}
-                    className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md text-red-500 scale-75 sm:scale-100"
-                  >
-                    <Icons.X />
-                  </button>
-                </div>
-              )}
-
+              {selectedImage && <img src={selectedImage} className="w-20 h-20 object-cover rounded-xl mt-2" />}
               <div className="flex justify-between items-center mt-2">
                 <div className="flex gap-2">
-                  {/* Camera Button - Native Capture */}
-                  <button 
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="p-2 text-primary bg-white rounded-xl shadow-sm border border-gray-100 hover:bg-green-50 transition-colors"
-                    title="Take Photo"
-                  >
-                    <Icons.Camera />
-                  </button>
-                  <input 
-                    type="file" 
-                    ref={cameraInputRef} 
-                    className="hidden" 
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleImageSelect}
-                  />
-
-                  {/* Gallery Button */}
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-gray-500 bg-white rounded-xl shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors"
-                    title="Upload Image"
-                  >
-                    <Icons.Image />
-                  </button>
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    className="hidden" 
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                  />
+                  <button onClick={() => cameraInputRef.current?.click()} className="p-2 bg-white rounded-xl shadow-sm text-primary"><Icons.Camera /></button>
+                  <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleImageSelect} />
+                  <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-white rounded-xl shadow-sm text-gray-500"><Icons.Image /></button>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
                 </div>
-                
-                <button 
-                  onClick={analyzeWithAI}
-                  disabled={isAnalyzing || (!query && !selectedImage)}
-                  className={`flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 rounded-xl font-bold text-sm sm:text-base transition-all ${
-                    isAnalyzing || (!query && !selectedImage)
-                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-primary text-white shadow-lg shadow-green-100 hover:scale-105 active:scale-95'
-                  }`}
-                >
-                  Analyze <Icons.Send />
-                </button>
+                <button onClick={analyzeWithAI} disabled={!query && !selectedImage} className="bg-primary text-white px-6 py-2 rounded-xl font-bold shadow-lg disabled:opacity-50">Analyze</button>
               </div>
             </div>
 
-            {/* Local DB Search Results */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {results.length > 0 && (
-                <div className="space-y-2">
-                  <div className="px-2 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Quick Add from Database</div>
-                  {results.map(food => (
-                    <div 
-                      key={food.id} 
-                      onClick={() => setSelectedFood(food)}
-                      className="p-3 sm:p-4 rounded-2xl hover:bg-green-50 active:bg-green-100 cursor-pointer border border-transparent hover:border-green-100 transition-all flex justify-between items-center group"
-                    >
-                      <div>
-                        <div className="font-bold text-gray-800 text-sm sm:text-base group-hover:text-primary transition-colors">{food.name}</div>
-                        <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5">{food.defaultPortionGrams}g • {Math.round(food.nutrientsPerGram.calories * food.defaultPortionGrams)} kcal</div>
-                      </div>
-                      <div className="text-gray-300 group-hover:text-primary transition-colors">
-                        <Icons.Plus />
-                      </div>
-                    </div>
-                  ))}
+            <div className="max-h-60 overflow-y-auto space-y-2">
+              {results.map(food => (
+                <div key={food.id} onClick={() => setSelectedFood(food)} className="p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-green-50 transition-colors flex justify-between items-center">
+                  <div className="font-bold">{food.name}</div>
+                  <Icons.Plus />
                 </div>
-              )}
-              {results.length === 0 && query.length > 1 && !isAnalyzing && !selectedImage && (
-                <div className="text-center mt-12 px-4">
-                   <p className="text-gray-400 font-medium text-sm">No direct database matches.</p>
-                   <p className="text-gray-300 text-xs mt-1">Tap <span className="font-bold text-primary">Analyze</span> to let AI handle it.</p>
-                </div>
-              )}
+              ))}
             </div>
           </>
         ) : (
-          /* Food Quantity Adjustment View */
-          <div className="flex-1 flex flex-col">
-            <div className="flex-1 overflow-y-auto">
-              <h4 className="text-lg sm:text-xl font-bold text-gray-800 mb-1">{selectedFood.name}</h4>
-              <p className="text-xs sm:text-sm text-gray-500 mb-6 sm:mb-8">{selectedFood.category}</p>
-              
-              <div className="flex items-center gap-4 mb-8">
-                <button 
-                  onClick={() => setQuantity(Math.max(10, quantity - 10))}
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-100 flex items-center justify-center text-lg sm:text-xl font-bold text-gray-600 active:bg-gray-200"
-                >-</button>
-                <div className="flex-1 text-center">
-                  <div className="text-3xl sm:text-4xl font-black text-primary">{quantity}</div>
-                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest">Grams</div>
-                </div>
-                <button 
-                  onClick={() => setQuantity(quantity + 10)}
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-100 flex items-center justify-center text-lg sm:text-xl font-bold text-gray-600 active:bg-gray-200"
-                >+</button>
-              </div>
-
-              <div className="bg-gray-50 p-4 sm:p-6 rounded-2xl grid grid-cols-2 gap-4 text-center">
-                <div>
-                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase">Calories</div>
-                  <div className="text-lg sm:text-xl font-black text-gray-800">
-                    {Math.round(selectedFood.nutrientsPerGram.calories * quantity)}
-                  </div>
-                </div>
-                 <div>
-                  <div className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase">Protein</div>
-                  <div className="text-lg sm:text-xl font-black text-gray-800">
-                    {(selectedFood.nutrientsPerGram.protein * quantity).toFixed(1)}g
-                  </div>
-                </div>
-              </div>
+          <div className="space-y-6">
+            <h4 className="text-xl font-bold">{selectedFood.name}</h4>
+            <div className="flex items-center gap-4">
+              <button onClick={() => setQuantity(Math.max(10, quantity - 10))} className="w-12 h-12 rounded-full bg-gray-100 text-2xl font-bold">-</button>
+              <div className="flex-1 text-center"><div className="text-3xl font-black text-primary">{quantity}g</div></div>
+              <button onClick={() => setQuantity(quantity + 10)} className="w-12 h-12 rounded-full bg-gray-100 text-2xl font-bold">+</button>
             </div>
-
-            <div className="flex gap-3 sm:gap-4 pt-4 mt-auto">
-              <button onClick={() => setSelectedFood(null)} className="flex-1 py-3 sm:py-4 bg-gray-100 rounded-2xl font-bold text-gray-600 text-sm sm:text-base">Back</button>
-              <button onClick={handleLocalAdd} className="flex-[2] py-3 sm:py-4 bg-primary text-white rounded-2xl font-bold shadow-lg shadow-green-100 text-sm sm:text-base">Add Meal</button>
+            <div className="flex gap-4">
+              <button onClick={() => setSelectedFood(null)} className="flex-1 py-4 bg-gray-100 rounded-2xl font-bold">Back</button>
+              <button onClick={handleLocalAdd} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-bold">Add Meal</button>
             </div>
           </div>
         )}

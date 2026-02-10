@@ -1,147 +1,121 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { db } from "./db";
 
 // --- Utilities ---
 
 export const parseAIJson = <T>(text: string): T => {
   if (!text) throw new Error("AI returned empty response.");
+  // Remove markdown formatting if present
   let cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
 
   try {
     return JSON.parse(cleaned) as T;
   } catch (e) {
+    // Attempt to find JSON array or object if parsing failed
     const firstBracket = cleaned.indexOf('[');
     const lastBracket = cleaned.lastIndexOf(']');
-    
     if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-      try {
-        return JSON.parse(cleaned.substring(firstBracket, lastBracket + 1)) as T;
-      } catch (innerE) {}
+      try { return JSON.parse(cleaned.substring(firstBracket, lastBracket + 1)); } catch (err) {}
     }
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      try {
-        return JSON.parse(cleaned.substring(firstBrace, lastBrace + 1)) as T;
-      } catch (innerE) {}
+      try { return JSON.parse(cleaned.substring(firstBrace, lastBrace + 1)); } catch (err) {}
     }
-    console.error("JSON Parse Failed. Input:", text);
-    throw new Error("Could not extract valid JSON from AI response.");
+    throw new Error("Could not parse AI response as JSON.");
   }
 };
 
 /**
- * Resizes an image to specific dimensions and quality to optimize bandwidth.
- * Uses createImageBitmap for off-thread processing where available.
- * 
- * @param dataUrl - The source image as data URL
- * @param maxSize - Max width/height (default 800px for balance of speed/quality)
- * @param quality - JPEG quality 0-1 (default 0.6 for high compression)
+ * Mobile-robust image resizing using Canvas
  */
-export const resizeImage = async (dataUrl: string, maxSize = 800, quality = 0.6): Promise<string> => {
-  const res = await fetch(dataUrl);
-  const blob = await res.blob();
-  const bitmap = await createImageBitmap(blob);
-  
-  let w = bitmap.width;
-  let h = bitmap.height;
+export const resizeImage = async (dataUrl: string, maxSize = 1024): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
 
-  if (w > maxSize || h > maxSize) {
-    const ratio = Math.min(maxSize / w, maxSize / h);
-    w = Math.round(w * ratio);
-    h = Math.round(h * ratio);
-  }
+      if (width > height) {
+        if (width > maxSize) {
+          height *= maxSize / width;
+          width = maxSize;
+        }
+      } else {
+        if (height > maxSize) {
+          width *= maxSize / height;
+          height = maxSize;
+        }
+      }
 
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  
-  if (!ctx) throw new Error("Canvas context init failed");
-  
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
-
-  await new Promise(resolve => requestAnimationFrame(resolve));
-
-  return canvas.toDataURL('image/jpeg', quality);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject("Canvas context unavailable");
+      
+      ctx.drawImage(img, 0, 0, width, height);
+      // Use 0.7 quality for mobile-friendly payload size
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
 };
 
 // --- Core AI Service ---
 
 /**
- * Retrieves the API Key from the local IndexedDB.
- * Throws if missing to prompt UI to ask user.
+ * Initialize AI instance using strictly process.env.API_KEY
  */
-async function getClient(): Promise<GoogleGenAI> {
-  const profile = await db.userProfile.get('current_user');
-  if (!profile?.apiKey) {
-    throw new Error("API_KEY_MISSING");
-  }
-  return new GoogleGenAI({ apiKey: profile.apiKey });
-}
+const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const analyzeImageWithRetry = async (
   imageBase64: string,
   prompt: string
 ): Promise<string> => {
-  const ai = await getClient();
+  const ai = getAI();
   
   try {
-    // Using gemini-3-flash-preview as it supports multimodal inputs (text + image) reliably
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', 
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: imageBase64,
-            },
-          },
+          { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
           { text: prompt },
         ],
       },
       config: {
-        temperature: 0.2, // Low temp for factual data
-        maxOutputTokens: 1000,
-        responseMimeType: 'application/json', // Enforce JSON for robust parsing
+        temperature: 0.1, // High deterministic output for nutrition
+        responseMimeType: 'application/json',
       }
     });
 
     if (!response.text) throw new Error("Empty response from AI");
     return response.text;
-
   } catch (error: any) {
-    console.error("AI Generation Error:", error);
-    if (error.message?.includes("403") || error.message?.includes("API_KEY")) {
-        throw new Error("API_KEY_INVALID");
-    }
+    console.error("Gemini Vision Error:", error);
     throw error;
   }
 };
 
 export const analyzeTextPrompt = async (prompt: string): Promise<string> => {
-  const ai = await getClient();
+  const ai = getAI();
   
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', // Fast text model
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
-        temperature: 0.3,
-        responseMimeType: 'application/json', // Enforce JSON
+        temperature: 0.2,
+        responseMimeType: 'application/json',
       }
     });
 
     if (!response.text) throw new Error("Empty response from AI");
     return response.text;
-
   } catch (error: any) {
-    if (error.message?.includes("403") || error.message?.includes("API_KEY")) {
-        throw new Error("API_KEY_INVALID");
-    }
+    console.error("Gemini Text Error:", error);
     throw error;
   }
 };
@@ -150,22 +124,17 @@ export const chatWithAI = async (
   message: string, 
   history: { role: 'user' | 'model'; text: string }[]
 ): Promise<string> => {
-  const ai = await getClient();
+  const ai = getAI();
   
-  // Convert history to Gemini format
-  const chatHistory = history.map(h => ({
-    role: h.role,
-    parts: [{ text: h.text }]
-  }));
-
   const chat = ai.chats.create({
     model: 'gemini-3-flash-preview',
-    history: chatHistory,
     config: {
-      systemInstruction: "You are NutriTrack, a helpful and encouraging nutrition assistant. Keep answers concise (under 100 words) unless asked for detail. Focus on Indian context if relevant.",
+      systemInstruction: "You are NutriTrack, an expert Indian food nutritionist. Keep responses under 80 words. Be encouraging and provide actionable tips.",
     }
   });
 
+  // Simple sequential message sending for history (SDK handles history internally better in some versions)
+  // but for reliability we send the current context
   const result = await chat.sendMessage({ message });
-  return result.text || "I'm having trouble thinking right now.";
+  return result.text || "I'm sorry, I couldn't process that.";
 };

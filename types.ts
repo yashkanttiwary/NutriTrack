@@ -16,27 +16,27 @@ export interface Nutrients {
   fat: number;          // grams
   fiber: number;        // grams
   micros?: string[];    // e.g., ["Iron: 10% DV", "Calcium: 50mg"]
-  sourceDatabase: "IFCT" | "USDA" | "Custom" | "AI"; // CRITICAL: Traceability
+  sourceDatabase: "IFCT" | "USDA" | "Custom" | "AI"; 
 }
 
 export interface PortionPreset {
   id: string;
-  label: string;           // "1 roti", "1 katori", "1 cup"
-  grams: number;           // Equivalent weight
+  label: string; 
+  grams: number;
   unit: PortionUnit;
 }
 
 export interface FoodItem {
-  id: string;                    // UUID or IFCT ID
-  name: string;                  // "Roti (Whole Wheat)"
-  nameAliases: string[];         // ["Chapati", "Phulka"]
-  regionalNames?: Record<string, string>; // { hi: "रोटी" }
+  id: string;
+  name: string;
+  nameAliases: string[];
+  regionalNames?: Record<string, string>;
   category: FoodCategory;
-  nutrientsPerGram: Omit<Nutrients, 'sourceDatabase'>;   // Base values per 1g
-  defaultPortionGrams: number;   // e.g., 40g for 1 roti
-  portions: PortionPreset[];     // Common serving sizes
+  nutrientsPerGram: Omit<Nutrients, 'sourceDatabase'>;
+  defaultPortionGrams: number;
+  portions: PortionPreset[];
   source: "IFCT" | "USDA" | "Custom";
-  version: string;               // "2024.1"
+  version: string;
 }
 
 // ============ USER PROFILE ============
@@ -56,9 +56,8 @@ export interface NutritionTargets {
 }
 
 export interface UserProfile {
-  id: string; // 'current_user'
+  id: string; 
   name: string;
-  apiKey?: string; // Stored locally, used for Gemini API
   gender: Gender;
   age: number;
   heightCm: number;
@@ -67,9 +66,8 @@ export interface UserProfile {
   goal: Goal;
   dietaryPreference: DietaryPreference;
   medicalConditions: string;
-  additionalDetails?: string; // New field for free-text goals/notes
+  additionalDetails?: string;
   createdAt: number;
-  // AI Generated Plan Persistence
   targets: NutritionTargets; 
   planExplanation: string;
 }
@@ -77,33 +75,10 @@ export interface UserProfile {
 // ============ CHAT ============
 
 export interface ChatMessage {
-  id?: number; // Auto-increment for DB
+  id?: number; 
   role: 'user' | 'model';
   text: string;
   timestamp: number;
-}
-
-// ============ DETECTION & TRACKING ============
-
-export interface BoundingBox {
-  x: number;        // % of viewport width
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface FoodGuess {
-  foodId: string;              // Reference to FoodItem.id
-  confidence: number;          // 0-1
-  portionEstimate?: number;    // Auto-estimated grams
-}
-
-export interface Detection {
-  id: string;                  // Stable ID from IoU tracking
-  boundingBox: BoundingBox;
-  foodGuesses: FoodGuess[];    // Top 3
-  timestamp: number;
-  frameStable: boolean;        // true if ID stable > 5 frames
 }
 
 // ============ USER LOGGING ============
@@ -112,8 +87,8 @@ export interface MealItem {
   id: string;
   foodId: string;
   portionGrams: number;
-  portionLabel: string;        // "2 roti"
-  nutrients: Nutrients;        // CALCULATED, NOT AI GENERATED
+  portionLabel: string;
+  nutrients: Nutrients;
   confidence: "high" | "medium" | "low";
   manuallyAdded: boolean;
 }
@@ -127,7 +102,7 @@ export interface Meal {
 }
 
 export interface DailyLog {
-  date: string;                // YYYY-MM-DD
+  date: string;
   meals: Meal[];
   totalNutrients: Nutrients;
   targets: NutritionTargets;
